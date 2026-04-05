@@ -5,6 +5,8 @@
 
 <br>
 
+<img src="https://github.com/zzztzzzt/Achernar.jl/blob/main/logo/logo.png" alt="lyra-logo" style="height: 280px; width: auto;" />
+
 ### Achernar - 3D Physics Simulation for Three.js.
 
 IMPORTANT : This project is still in the development and testing stages, licensing terms may be updated in the future. Please don't do any commercial usage currently.
