@@ -1,0 +1,14 @@
+name = "Achernar"
+uuid = "f8d700cf-38c9-4d0d-98e8-0b57668e6014"
+version = "0.1.0"
+authors = ["zzztzzzt <180073683+zzztzzzt@users.noreply.github.com>"]
+
+[deps]
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+Oxygen = "df9a0d86-3283-4920-82dc-4555fc0d1d8b"
+
+[compat]
+HTTP = "1.11.0"
+JSON = "1.5.0"
+Oxygen = "1.10.1"

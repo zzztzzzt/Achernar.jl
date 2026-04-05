@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Achernar Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", sans-serif;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+      }
+
+      #app {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      canvas {
+        display: block;
+      }
+
+      .hud {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 1;
+        max-width: min(420px, calc(100vw - 40px));
+        padding: 14px 16px;
+        border: 1px solid rgba(182, 221, 255, 0.2);
+        border-radius: 14px;
+        background: rgba(6, 17, 29, 0.72);
+        backdrop-filter: blur(10px);
+      }
+
+      .hud h1 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .hud p {
+        margin: 0;
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+
+      .status {
+        margin-top: 8px;
+        color: #8fe7c6;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="hud">
+        <h1>Achernar Viewer</h1>
+        <p>Three.js scene is mounted here and reads data from the Julia API</p>
+        <p>You are using : Achernar 1.0</p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
