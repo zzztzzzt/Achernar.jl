@@ -191,7 +191,7 @@ end
 WebSocket Stream
 =#
 
-@websocket "/wave" function(ws::HTTP.WebSocket)
+@websocket "/phillips-ocean" function(ws::HTTP.WebSocket)
     start_time = time()
 
     try

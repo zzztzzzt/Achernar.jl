@@ -86,7 +86,7 @@ function applyHeights(heights) {
   }
 }
 
-const socket = new WebSocket("ws://localhost:8080/wave");
+const socket = new WebSocket("ws://localhost:8080/phillips-ocean");
 socket.binaryType = "arraybuffer";
 
 socket.addEventListener("message", (event) => {
