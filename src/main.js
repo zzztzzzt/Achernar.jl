@@ -47,8 +47,10 @@ const planeGeometry = new THREE.PlaneGeometry(
   GRID_RESOLUTION - 1,
 );
 planeGeometry.rotateX(-Math.PI / 2);
+
 const positionAttribute = planeGeometry.getAttribute("position");
 positionAttribute.setUsage(THREE.DynamicDrawUsage);
+
 const positions = positionAttribute.array;
 const targetHeights = new Float32Array(positionAttribute.count);
 
@@ -73,11 +75,13 @@ const wireframe = new THREE.Mesh(
 );
 scene.add(wireframe);
 
+/*
+Copy incoming height data into target buffer
+*/
 function applyHeights(heights) {
-  targetHeights.fill(0);
   const usableCount = Math.min(targetHeights.length, heights.length);
 
-  for (let i = 0; i < usableCount; i += 1) {
+  for (let i = 0; i < usableCount; i++) {
     targetHeights[i] = heights[i];
   }
 }
@@ -115,17 +119,22 @@ window.addEventListener("resize", onResize);
 function animate() {
   const time = performance.now() / 1000;
 
-  for (let i = 0; i < targetHeights.length; i += 1) {
-    const index = i * 3 + 1;
-    positions[index] += (targetHeights[i] - positions[index]) * 0.16;
+  // Optimized loop: avoid i*3 multiplication
+  for (let i = 0, j = 1; i < targetHeights.length; i++, j += 3) {
+    positions[j] += (targetHeights[i] - positions[j]) * 0.16;
   }
 
   positionAttribute.needsUpdate = true;
+
+  // Improve lighting correctness ( adds some CPU cost )
+  planeGeometry.computeVertexNormals();
+
   water.rotation.y = time * 0.08;
   wireframe.rotation.y = water.rotation.y;
-  controls.update();
 
+  controls.update();
   renderer.render(scene, camera);
+
   requestAnimationFrame(animate);
 }
 
