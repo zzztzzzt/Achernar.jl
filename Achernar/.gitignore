@@ -1,2 +1,5 @@
 # Manifest.toml
 Manifest.toml
+
+# CUDA.jl
+LocalPreferences.toml
