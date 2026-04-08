@@ -1,18 +1,29 @@
 using Oxygen
 using HTTP
 using Random
+using CUDA
 using Base.Threads
 using HTTP.WebSockets: WebSocketError, send
 
 const RESOLUTION = 96
 const FRAME_INTERVAL = 1 / 30
-const DOMAIN_SIZE = 18.0f0
+const DOMAIN_SIZE = 36.0f0
 const COMPONENT_COUNT = 128
 
 const GRAVITY = 9.81f0
 const WIND_SPEED = 14.0f0
 const WIND_DIRECTION = (0.92f0, 0.38f0)
 const AMPLITUDE_SCALE = 0.08f0
+
+const CUDA_WAVE_ENABLED = let available = false
+    try
+        available = CUDA.functional()
+    catch
+        available = false
+    end
+    available
+end
+const ENABLE_THREADED_WAVE = nthreads() > 1
 
 #=
 Precomputed Storage (SoA layout)
@@ -25,11 +36,16 @@ const AMP = Vector{Float32}(undef, COMPONENT_COUNT)
 const PHASE0 = Vector{Float32}(undef, COMPONENT_COUNT)
 
 # Spatial phase cache:
-# PHASE_BASE[i, j] = kx[j]*x[i] + ky[j]*y[i]
+# PHASE_BASE[i, j] = kx[j] * x[i] + ky[j] * y[i]
 const PHASE_BASE = Matrix{Float32}(undef, RESOLUTION * RESOLUTION, COMPONENT_COUNT)
 
 # Frame buffer ( reused every frame, zero allocation )
 const FRAME_BUFFER = Vector{Float32}(undef, RESOLUTION * RESOLUTION)
+const d_PHASE_BASE = CUDA_WAVE_ENABLED ? CuArray(PHASE_BASE) : nothing
+const d_OMEGA = CUDA_WAVE_ENABLED ? CuArray(OMEGA) : nothing
+const d_AMP = CUDA_WAVE_ENABLED ? CuArray(AMP) : nothing
+const d_PHASE0 = CUDA_WAVE_ENABLED ? CuArray(PHASE0) : nothing
+const d_FRAME_BUFFER = CUDA_WAVE_ENABLED ? CUDA.zeros(Float32, RESOLUTION * RESOLUTION) : nothing
 
 # Grid coordinates
 const GRID_X = Float32[
@@ -95,7 +111,7 @@ function build_components!()
     rng = MersenneTwister(42)
     windx, windy = normalize2(WIND_DIRECTION...)
 
-    pair_count = COMPONENT_COUNT ÷ 2
+    pair_count = div(COMPONENT_COUNT, 2)
 
     idx = 1
     for i in 1:pair_count
@@ -157,22 +173,55 @@ function precompute_phase!()
     end
 end
 
-# Initialize once
+function upload_wave_constants!()
+    CUDA_WAVE_ENABLED || return
+    copyto!(d_PHASE_BASE, PHASE_BASE)
+    copyto!(d_OMEGA, OMEGA)
+    copyto!(d_AMP, AMP)
+    copyto!(d_PHASE0, PHASE0)
+end
+
 build_components!()
 precompute_phase!()
+upload_wave_constants!()
 
 #=
-Wave Simulation ( Optimized )
+Wave Simulation
 =#
 
-"""
-Compute wave height field in-place.
+function wave_kernel!(frame, phase_base, omega, amp, phase0, tf)
+    idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-- No allocations
-- Multi-threaded
-- Uses precomputed spatial phase
-"""
-function compute_wave!(data::Vector{Float32}, t::Float64)
+    if idx <= length(frame)
+        h = 0.0f0
+
+        @inbounds for j in 1:COMPONENT_COUNT
+            phase = phase_base[idx, j] - omega[j] * tf + phase0[j]
+            h += amp[j] * cos(phase)
+        end
+
+        frame[idx] = h
+    end
+
+    return nothing
+end
+
+function compute_wave_serial!(data::Vector{Float32}, t::Float64)
+    tf = Float32(t)
+
+    @inbounds for i in eachindex(data)
+        h = 0.0f0
+
+        @simd for j in 1:COMPONENT_COUNT
+            phase = PHASE_BASE[i, j] - OMEGA[j] * tf + PHASE0[j]
+            @fastmath h += AMP[j] * cos(phase)
+        end
+
+        data[i] = h
+    end
+end
+
+function compute_wave_threaded!(data::Vector{Float32}, t::Float64)
     tf = Float32(t)
 
     Threads.@threads for i in eachindex(data)
@@ -184,6 +233,25 @@ function compute_wave!(data::Vector{Float32}, t::Float64)
         end
 
         data[i] = h
+    end
+end
+
+function compute_wave_gpu!(data::Vector{Float32}, t::Float64)
+    threads = 256
+    blocks = cld(length(data), threads)
+
+    @cuda threads=threads blocks=blocks wave_kernel!(d_FRAME_BUFFER, d_PHASE_BASE, d_OMEGA, d_AMP, d_PHASE0, Float32(t))
+    CUDA.synchronize()
+    copyto!(data, d_FRAME_BUFFER)
+end
+
+function compute_wave!(data::Vector{Float32}, t::Float64)
+    if CUDA_WAVE_ENABLED
+        compute_wave_gpu!(data, t)
+    elseif ENABLE_THREADED_WAVE
+        compute_wave_threaded!(data, t)
+    else
+        compute_wave_serial!(data, t)
     end
 end
 
@@ -216,5 +284,7 @@ WebSocket Stream
         end
     end
 end
+
+println(CUDA_WAVE_ENABLED ? "Wave compute backend: CUDA.jl" : "Wave compute backend: CPU")
 
 serve()

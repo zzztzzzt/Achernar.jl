@@ -1,16 +1,38 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import {
+  MeshBasicNodeMaterial,
+  MeshStandardNodeMaterial,
+} from "three/webgpu";
+import {
+  cross,
+  normalize,
+  positionLocal,
+  texture,
+  uniform,
+  uv,
+  vec2,
+  vec3,
+  float,
+  mix,
+} from "three/tsl";
 
 const GRID_RESOLUTION = 96;
+const PLANE_SIZE = 20;
+const HEIGHT_SCALE = 1.35;
 const APP = document.querySelector("#app");
 
 if (!APP) {
   throw new Error("Missing #app mount element.");
 }
 
+if (!navigator.gpu) {
+  throw new Error("WebGPU is required for the Phillips ocean viewer.");
+}
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x06111d);
-scene.fog = new THREE.Fog(0x06111d, 14, 32);
+scene.fog = new THREE.Fog(0x06111d, 24, 52);
 
 const camera = new THREE.PerspectiveCamera(
   55,
@@ -18,19 +40,20 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   100,
 );
-camera.position.set(6, 6, 9);
+camera.position.set(9, 8, 13);
 camera.lookAt(0, 0, 0);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGPURenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setAnimationLoop(animate);
 APP.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.target.set(0, 0, 0);
 controls.minDistance = 4;
-controls.maxDistance = 20;
+controls.maxDistance = 30;
 controls.maxPolarAngle = Math.PI * 0.48;
 
 const ambientLight = new THREE.AmbientLight(0x8db8ff, 0.85);
@@ -40,50 +63,98 @@ const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
 keyLight.position.set(7, 12, 5);
 scene.add(keyLight);
 
+const backLight = new THREE.DirectionalLight(0x7eb8ff, 0.9);
+backLight.position.set(-10, 4, -8);
+scene.add(backLight);
+
 const planeGeometry = new THREE.PlaneGeometry(
-  10,
-  10,
+  PLANE_SIZE,
+  PLANE_SIZE,
   GRID_RESOLUTION - 1,
   GRID_RESOLUTION - 1,
 );
 planeGeometry.rotateX(-Math.PI / 2);
 
-const positionAttribute = planeGeometry.getAttribute("position");
-positionAttribute.setUsage(THREE.DynamicDrawUsage);
+const heightData = new Float32Array(GRID_RESOLUTION * GRID_RESOLUTION);
+const heightTexture = new THREE.DataTexture(
+  heightData,
+  GRID_RESOLUTION,
+  GRID_RESOLUTION,
+  THREE.RedFormat,
+  THREE.FloatType,
+);
+heightTexture.wrapS = THREE.ClampToEdgeWrapping;
+heightTexture.wrapT = THREE.ClampToEdgeWrapping;
+heightTexture.magFilter = THREE.LinearFilter;
+heightTexture.minFilter = THREE.LinearFilter;
+heightTexture.needsUpdate = true;
 
-const positions = positionAttribute.array;
-const targetHeights = new Float32Array(positionAttribute.count);
+const heightStep = PLANE_SIZE / (GRID_RESOLUTION - 1);
+const texelStep = new THREE.Vector2(1 / GRID_RESOLUTION, 1 / GRID_RESOLUTION);
 
-const planeMaterial = new THREE.MeshStandardMaterial({
+const heightScaleNode = uniform(HEIGHT_SCALE);
+const texelStepNode = uniform(texelStep);
+const heightTextureNode = texture(heightTexture);
+
+function buildHeightNode(uvNode) {
+  return heightTextureNode.sample(uvNode).r.mul(heightScaleNode);
+}
+
+function buildPositionNode() {
+  const surfaceUv = uv();
+  const height = buildHeightNode(surfaceUv);
+  return positionLocal.add(vec3(0, height, 0));
+}
+
+function buildNormalNode() {
+  const surfaceUv = uv();
+  const stepX = vec2(texelStepNode.x, 0);
+  const stepY = vec2(0, texelStepNode.y);
+
+  const left = buildHeightNode(surfaceUv.sub(stepX));
+  const right = buildHeightNode(surfaceUv.add(stepX));
+  const down = buildHeightNode(surfaceUv.sub(stepY));
+  const up = buildHeightNode(surfaceUv.add(stepY));
+
+  const tangentX = vec3(float(heightStep * 2), right.sub(left), 0);
+  const tangentZ = vec3(0, up.sub(down), float(heightStep * 2));
+
+  return normalize(cross(tangentZ, tangentX));
+}
+
+const waterMaterial = new MeshStandardNodeMaterial({
   color: 0x2ec4ff,
-  metalness: 0.05,
-  roughness: 0.2,
+  metalness: 0.08,
+  roughness: 0.18,
   side: THREE.DoubleSide,
 });
+waterMaterial.positionNode = buildPositionNode();
+waterMaterial.normalNode = buildNormalNode();
+waterMaterial.colorNode = mix(
+  vec3(0.039, 0.165, 0.263),
+  vec3(0.49, 0.89, 1.0),
+  heightTextureNode.sample(uv()).r.mul(0.5).add(0.5),
+);
 
-const water = new THREE.Mesh(planeGeometry, planeMaterial);
+const water = new THREE.Mesh(planeGeometry, waterMaterial);
 scene.add(water);
 
-const wireframe = new THREE.Mesh(
-  planeGeometry,
-  new THREE.MeshBasicMaterial({
-    color: 0xb7f0ff,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.22,
-  }),
-);
+const wireframeMaterial = new MeshBasicNodeMaterial({
+  color: 0xb7f0ff,
+  wireframe: true,
+  transparent: true,
+  opacity: 0.18,
+});
+wireframeMaterial.positionNode = buildPositionNode();
+
+const wireframe = new THREE.Mesh(planeGeometry, wireframeMaterial);
 scene.add(wireframe);
 
-/*
-Copy incoming height data into target buffer
-*/
 function applyHeights(heights) {
-  const usableCount = Math.min(targetHeights.length, heights.length);
-
-  for (let i = 0; i < usableCount; i++) {
-    targetHeights[i] = heights[i];
-  }
+  const usableCount = Math.min(heightData.length, heights.length);
+  heightData.fill(0);
+  heightData.set(heights.subarray(0, usableCount), 0);
+  heightTexture.needsUpdate = true;
 }
 
 const socket = new WebSocket("ws://localhost:8080/phillips-ocean");
@@ -98,8 +169,7 @@ socket.addEventListener("message", (event) => {
     throw new Error("Wave socket payload has an invalid byte length.");
   }
 
-  const heights = new Float32Array(event.data);
-  applyHeights(heights);
+  applyHeights(new Float32Array(event.data));
 });
 
 socket.addEventListener("error", () => {
@@ -119,23 +189,9 @@ window.addEventListener("resize", onResize);
 function animate() {
   const time = performance.now() / 1000;
 
-  // Optimized loop: avoid i*3 multiplication
-  for (let i = 0, j = 1; i < targetHeights.length; i++, j += 3) {
-    positions[j] += (targetHeights[i] - positions[j]) * 0.16;
-  }
-
-  positionAttribute.needsUpdate = true;
-
-  // Improve lighting correctness ( adds some CPU cost )
-  planeGeometry.computeVertexNormals();
-
   water.rotation.y = time * 0.08;
   wireframe.rotation.y = water.rotation.y;
 
   controls.update();
   renderer.render(scene, camera);
-
-  requestAnimationFrame(animate);
 }
-
-animate();
