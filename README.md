@@ -11,6 +11,20 @@
 
 IMPORTANT : This project is still in the development and testing stages, licensing terms may be updated in the future. Please don't do any commercial usage currently.
 
+## Project Dependencies Guide
+
+[![Julia](https://img.shields.io/badge/Julia-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/JuliaLang/julia)
+[![OxygenJl](https://img.shields.io/badge/Oxygen.jl-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/OxygenFramework/Oxygen.jl)
+[![CUDAJl](https://img.shields.io/badge/CUDA.jl-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/juliagpu/cuda.jl)
+[![three.js](https://img.shields.io/badge/Three.js-000000?style=for-the-badge&logo=three.js&logoColor=white)](https://github.com/mrdoob/three.js/)
+[![Vite](https://img.shields.io/badge/Vite-9135FF?style=for-the-badge&logo=vite&logoColor=white)](https://github.com/vitejs/vite)
+
+**[ for Dependencies Details please see the end of this README ]**
+
+Achernar uses Oxygen.jl & CUDA.jl to ensure the fast & stable physics simulation data sending process. Oxygen.jl & CUDA.jl licensed under the MIT License.  
+
+Achernar uses Three.js & Vite to build frontend 3D Viewer. Three.js & Vite licensed under the MIT License.
+
 ![1.0showcase](https://github.com/zzztzzzt/Achernar.jl/blob/main/showcase/Achernar1.0.webp)
 
 ## Project Detail / Debug
@@ -38,3 +52,16 @@ using CUDA
 ```shell
 CUDA.set_runtime_version!(v"13.1")
 ```
+
+## Project Dependencies Details
+
+Oxygen.jl License : [https://github.com/OxygenFramework/Oxygen.jl/blob/master/LICENSE.md](https://github.com/OxygenFramework/Oxygen.jl/blob/master/LICENSE.md)
+<br>
+
+CUDA.jl License : [https://github.com/JuliaGPU/CUDA.jl/blob/master/LICENSE.md](https://github.com/JuliaGPU/CUDA.jl/blob/master/LICENSE.md)
+<br>
+
+Three.js License : [https://github.com/mrdoob/three.js/blob/dev/LICENSE](https://github.com/mrdoob/three.js/blob/dev/LICENSE)
+<br>
+
+Vite License : [https://github.com/vitejs/vite/blob/main/LICENSE](https://github.com/vitejs/vite/blob/main/LICENSE)
