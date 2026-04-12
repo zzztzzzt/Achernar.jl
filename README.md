@@ -27,6 +27,28 @@ Achernar uses Three.js & Vite to build frontend 3D Viewer. Three.js & Vite licen
 
 ![1.0showcase](https://github.com/zzztzzzt/Achernar.jl/blob/main/showcase/Achernar1.0.webp)
 
+## WIP Project Achernar
+
+use below command to start it
+
+`julia`
+
+`] activate .`
+
+`instantiate`
+
+and hit Ctrl + D
+
+`julia --project=. src/Metaballs.jl`
+
+open another CMD
+
+`npm install`
+
+`npx vite`
+
+you will see 3D viewer after these step
+
 ## Project Detail / Debug
 
 ### CUDA version conflict solving :
