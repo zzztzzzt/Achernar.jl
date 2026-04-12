@@ -16,6 +16,7 @@ IMPORTANT : This project is still in the development and testing stages, licensi
 [![Julia](https://img.shields.io/badge/Julia-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/JuliaLang/julia)
 [![OxygenJl](https://img.shields.io/badge/Oxygen.jl-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/OxygenFramework/Oxygen.jl)
 [![CUDAJl](https://img.shields.io/badge/CUDA.jl-9558B2?style=for-the-badge&logo=julia&logoColor=white)](https://github.com/juliagpu/cuda.jl)
+[![WebGPU](https://img.shields.io/badge/WebGPU-005A9C?style=for-the-badge&logo=webgpu&logoColor=white)](https://www.w3.org/TR/webgpu/)
 [![three.js](https://img.shields.io/badge/Three.js-000000?style=for-the-badge&logo=three.js&logoColor=white)](https://github.com/mrdoob/three.js/)
 [![Vite](https://img.shields.io/badge/Vite-9135FF?style=for-the-badge&logo=vite&logoColor=white)](https://github.com/vitejs/vite)
 
@@ -23,13 +24,15 @@ IMPORTANT : This project is still in the development and testing stages, licensi
 
 Achernar uses Oxygen.jl & CUDA.jl to ensure the fast & stable physics simulation data sending process. Oxygen.jl & CUDA.jl licensed under the MIT License.  
 
-Achernar uses Three.js & Vite to build frontend 3D Viewer. Three.js & Vite licensed under the MIT License.
+Achernar uses Three.js ( with WebGPU ) & Vite to build frontend 3D Viewer. Three.js & Vite licensed under the MIT License.
 
 ![1.0showcase](https://github.com/zzztzzzt/Achernar.jl/blob/main/showcase/Achernar1.0.webp)
 
 ## WIP Project Achernar
 
 use below command to start it
+
+go to `./Achernar/`
 
 `julia`
 
@@ -41,13 +44,13 @@ and hit Ctrl + D
 
 `julia --project=. src/Metaballs.jl`
 
-open another CMD
+at project root, open another CMD
 
 `npm install`
 
 `npx vite`
 
-you will see 3D viewer after these step
+you will see 3D viewer after these steps
 
 ## Project Detail / Debug
 
