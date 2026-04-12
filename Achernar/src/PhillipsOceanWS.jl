@@ -7,7 +7,7 @@ Depends on `PhillipsOcean.jl` for all physics computation.
 Usage
 
 ```julia
-julia --threads auto src/PhillipsOceanWS.jl
+julia --project=. --threads=auto src/PhillipsOceanWS.jl
 ```
 
 Endpoint : ws://localhost:8080/phillips-ocean

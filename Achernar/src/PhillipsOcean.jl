@@ -1,3 +1,19 @@
+"""
+PhillipsOcean
+Computes ocean height via Phillips Spectrum across CUDA, Multi-threaded, or Serial backends.
+
+Quick Start :
+1. Setup : `include("PhillipsOcean.jl"); using .PhillipsOcean`
+2. Init : `init!()` is called automatically on load to configure GPU/CPU resources.
+3. Run : `compute_wave!(FRAME_BUFFER, t)` inside your loop.
+        - `t` : Elapsed time in seconds ( Float64 ).
+        - `FRAME_BUFFER` : Vector{Float32} mapped to 2D grid ( Column-major ).
+
+Notes :
+- Configuration : Adjust `const` values ( WIND, AMP, etc. ) in-file and re-include.
+- Performance : Run Julia with `--threads auto` for multi-threaded CPU support.
+"""
+
 module PhillipsOcean
 
 using Random
@@ -117,9 +133,9 @@ function init!()
 
     if CUDA_WAVE_ENABLED[]
         d_PHASE_BASE[] = CuArray(PHASE_BASE)
-        d_OMEGA[]      = CuArray(OMEGA)
-        d_AMP[]        = CuArray(AMP)
-        d_PHASE0[]     = CuArray(PHASE0)
+        d_OMEGA[] = CuArray(OMEGA)
+        d_AMP[] = CuArray(AMP)
+        d_PHASE0[] = CuArray(PHASE0)
         d_FRAME_BUFFER[] = CUDA.zeros(Float32, RESOLUTION * RESOLUTION)
     end
     

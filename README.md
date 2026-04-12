@@ -42,7 +42,7 @@ go to `./Achernar/`
 
 and hit Ctrl + D
 
-`julia --project=. src/PhillipsOceanWS.jl`
+`julia --project=. --threads=auto src/PhillipsOceanWS.jl`
 
 at project root, open another CMD
 
