@@ -1,9 +1,42 @@
-using Oxygen
-using HTTP
+"""
+PhillipsOcean
+
+Physics-based ocean wave simulation using the Phillips spectrum.
+Initialization runs automatically on `using` — no manual setup needed.
+
+Usage
+
+```julia
+include("PhillipsOcean.jl")
+using .PhillipsOcean
+
+# Compute a wave heightfield at time t ( seconds ) into FRAME_BUFFER
+compute_wave!(FRAME_BUFFER, t)
+# FRAME_BUFFER[i] => wave height at grid point i ( Float32, RESOLUTION² elements )
+```
+
+The compute backend ( CUDA / CPU-threaded / CPU-serial ) is selected automatically.
+"""
+
+module PhillipsOcean
+
 using Random
 using CUDA
 using Base.Threads
-using HTTP.WebSockets: WebSocketError, send
+
+#=
+Public API
+=#
+export RESOLUTION, FRAME_INTERVAL, DOMAIN_SIZE, COMPONENT_COUNT
+export GRAVITY, WIND_SPEED, WIND_DIRECTION, AMPLITUDE_SCALE
+export FRAME_BUFFER
+export normalize2, phillips_spectrum
+export compute_wave!
+export init!
+
+#=
+Constants
+=#
 
 const RESOLUTION = 96
 const FRAME_INTERVAL = 1 / 30
@@ -26,7 +59,7 @@ end
 const ENABLE_THREADED_WAVE = nthreads() > 1
 
 #=
-Precomputed Storage (SoA layout)
+Precomputed Storage ( SoA layout )
 =#
 
 const KX = Vector{Float32}(undef, COMPONENT_COUNT)
@@ -41,11 +74,6 @@ const PHASE_BASE = Matrix{Float32}(undef, RESOLUTION * RESOLUTION, COMPONENT_COU
 
 # Frame buffer ( reused every frame, zero allocation )
 const FRAME_BUFFER = Vector{Float32}(undef, RESOLUTION * RESOLUTION)
-const d_PHASE_BASE = CUDA_WAVE_ENABLED ? CuArray(PHASE_BASE) : nothing
-const d_OMEGA = CUDA_WAVE_ENABLED ? CuArray(OMEGA) : nothing
-const d_AMP = CUDA_WAVE_ENABLED ? CuArray(AMP) : nothing
-const d_PHASE0 = CUDA_WAVE_ENABLED ? CuArray(PHASE0) : nothing
-const d_FRAME_BUFFER = CUDA_WAVE_ENABLED ? CUDA.zeros(Float32, RESOLUTION * RESOLUTION) : nothing
 
 # Grid coordinates
 const GRID_X = Float32[
@@ -58,13 +86,22 @@ const GRID_Y = Float32[
     for y in 1:RESOLUTION, _ in 1:RESOLUTION
 ]
 
+# GPU mirrors ( allocated only when CUDA is functional )
+const d_PHASE_BASE = CUDA_WAVE_ENABLED ? CuArray(PHASE_BASE) : nothing
+const d_OMEGA = CUDA_WAVE_ENABLED ? CuArray(OMEGA) : nothing
+const d_AMP = CUDA_WAVE_ENABLED ? CuArray(AMP) : nothing
+const d_PHASE0 = CUDA_WAVE_ENABLED ? CuArray(PHASE0) : nothing
+const d_FRAME_BUFFER = CUDA_WAVE_ENABLED ? CUDA.zeros(Float32, RESOLUTION * RESOLUTION) : nothing
+
 #=
 Utility Functions
 =#
 
 """
+normalize2(x, y) -> (nx, ny)
+
 Normalize a 2D vector safely.
-Returns (0,0) if the input length is near zero.
+Returns `(0f0, 0f0)` if the vector length is near zero.
 """
 function normalize2(x::Float32, y::Float32)
     len = sqrt(x * x + y * y)
@@ -75,8 +112,10 @@ function normalize2(x::Float32, y::Float32)
 end
 
 """
+phillips_spectrum(kx, ky, windx, windy) -> Float32
+
 Phillips spectrum for ocean wave energy distribution.
-This models how wind transfers energy into waves.
+Models how wind transfers energy into surface waves.
 """
 function phillips_spectrum(kx::Float32, ky::Float32, windx::Float32, windy::Float32)
     k2 = kx * kx + ky * ky
@@ -104,7 +143,9 @@ Initialization
 =#
 
 """
-Build wave components using a spectral model.
+build_components!()
+
+Populate wave component arrays using a Phillips spectral model.
 Uses Structure-of-Arrays layout for cache efficiency.
 """
 function build_components!()
@@ -120,8 +161,8 @@ function build_components!()
         k = Float32(2 * pi) / wavelength
 
         spread = 1.05f0
-        angle = Float32(atan(windy, windx)) +
-                randn(rng, Float32) * spread * (0.2f0 + 0.8f0 * band)
+        angle  = Float32(atan(windy, windx)) +
+                 randn(rng, Float32) * spread * (0.2f0 + 0.8f0 * band)
 
         kx_main = cos(angle) * k
         ky_main = sin(angle) * k
@@ -129,9 +170,8 @@ function build_components!()
         spectrum_main = phillips_spectrum(kx_main, ky_main, windx, windy)
 
         AMP[idx] = AMPLITUDE_SCALE *
-                   sqrt(max(spectrum_main, 0f0)) *
-                   (0.35f0 + 0.65f0 * (1f0 - band))
-
+                      sqrt(max(spectrum_main, 0f0)) *
+                      (0.35f0 + 0.65f0 * (1f0 - band))
         PHASE0[idx] = rand(rng, Float32) * Float32(2pi)
         OMEGA[idx] = sqrt(GRAVITY * k)
         KX[idx] = kx_main
@@ -139,7 +179,7 @@ function build_components!()
 
         idx += 1
 
-        # backward wave
+        # Backward wave
         kx_back = -kx_main
         ky_back = -ky_main
 
@@ -148,7 +188,6 @@ function build_components!()
         AMP[idx] = AMPLITUDE_SCALE * 0.45f0 *
                    sqrt(max(spectrum_back, 0f0) + max(spectrum_main, 0f0) * 0.25f0) *
                    (0.35f0 + 0.65f0 * (1f0 - band))
-
         PHASE0[idx] = rand(rng, Float32) * Float32(2pi)
         OMEGA[idx] = sqrt(GRAVITY * k)
         KX[idx] = kx_back
@@ -159,20 +198,25 @@ function build_components!()
 end
 
 """
-Precompute spatial phase :
-kx*x + ky*y for every (pixel, component)
+precompute_phase!()
+
+Precompute spatial phase grid: `kx*x + ky*y` for every ( pixel, component ) pair.
 """
 function precompute_phase!()
     @inbounds for i in eachindex(GRID_X)
         x = GRID_X[i]
         y = GRID_Y[i]
-
         for j in 1:COMPONENT_COUNT
             PHASE_BASE[i, j] = KX[j] * x + KY[j] * y
         end
     end
 end
 
+"""
+upload_wave_constants!()
+
+Copy host-side wave arrays to the GPU. No-op if CUDA is not available.
+"""
 function upload_wave_constants!()
     CUDA_WAVE_ENABLED || return
     copyto!(d_PHASE_BASE, PHASE_BASE)
@@ -181,9 +225,18 @@ function upload_wave_constants!()
     copyto!(d_PHASE0, PHASE0)
 end
 
-build_components!()
-precompute_phase!()
-upload_wave_constants!()
+"""
+init!()
+
+Run full initialization: build wave components, precompute spatial phases,
+and upload constants to the GPU if available.
+"""
+function init!()
+    build_components!()
+    precompute_phase!()
+    upload_wave_constants!()
+    @info "PhillipsOcean init complete" backend=(CUDA_WAVE_ENABLED ? "CUDA" : (ENABLE_THREADED_WAVE ? "CPU-threaded" : "CPU-serial"))
+end
 
 #=
 Wave Simulation
@@ -238,13 +291,21 @@ end
 
 function compute_wave_gpu!(data::Vector{Float32}, t::Float64)
     threads = 256
-    blocks = cld(length(data), threads)
+    blocks  = cld(length(data), threads)
 
-    @cuda threads=threads blocks=blocks wave_kernel!(d_FRAME_BUFFER, d_PHASE_BASE, d_OMEGA, d_AMP, d_PHASE0, Float32(t))
+    @cuda threads=threads blocks=blocks wave_kernel!(
+        d_FRAME_BUFFER, d_PHASE_BASE, d_OMEGA, d_AMP, d_PHASE0, Float32(t)
+    )
     CUDA.synchronize()
     copyto!(data, d_FRAME_BUFFER)
 end
 
+"""
+compute_wave!(data, t)
+
+Fill `data` with wave heights at time `t` ( seconds ).
+Dispatches to GPU, multi-threaded, or serial backend automatically.
+"""
 function compute_wave!(data::Vector{Float32}, t::Float64)
     if CUDA_WAVE_ENABLED
         compute_wave_gpu!(data, t)
@@ -256,35 +317,8 @@ function compute_wave!(data::Vector{Float32}, t::Float64)
 end
 
 #=
-WebSocket Stream
+Module-level initialization
 =#
+init!()
 
-@websocket "/phillips-ocean" function(ws::HTTP.WebSocket)
-    start_time = time()
-
-    try
-        while true
-            frame_start = time()
-
-            t = frame_start - start_time
-
-            compute_wave!(FRAME_BUFFER, t)
-
-            # Zero-copy reinterpretation
-            payload = reinterpret(UInt8, FRAME_BUFFER)
-            send(ws, payload)
-
-            # Frame pacing ( stable FPS )
-            elapsed = time() - frame_start
-            sleep(max(0, FRAME_INTERVAL - elapsed))
-        end
-    catch err
-        if !isa(err, WebSocketError)
-            rethrow(err)
-        end
-    end
-end
-
-println(CUDA_WAVE_ENABLED ? "Wave compute backend: CUDA.jl" : "Wave compute backend: CPU")
-
-serve()
+end # module PhillipsOcean
