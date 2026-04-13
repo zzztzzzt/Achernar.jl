@@ -20,6 +20,8 @@ const heights = new Float32Array(event.data); // heights[row * 96 + col]
 ```
 """
 
+module PhillipsOceanWS
+
 using Oxygen
 using HTTP
 using HTTP.WebSockets: WebSocketError, send
@@ -28,37 +30,42 @@ include("PhillipsOcean.jl")
 using .PhillipsOcean
 
 #=
-WebSocket Route
+WebSocket streaming logic
 =#
-
-@websocket "/phillips-ocean" function(ws::HTTP.WebSocket)
+function ocean_stream_handler(ws)
     start_time = time()
-
     try
         while true
             frame_start = time()
-
             t = frame_start - start_time
 
             compute_wave!(FRAME_BUFFER, t)
 
-            # Zero-copy reinterpretation of Float32 buffer as raw bytes
+            # Convert the Float32 buffer to a raw byte ( Zero-copy )
             payload = reinterpret(UInt8, FRAME_BUFFER)
             send(ws, payload)
 
-            # Frame pacing – maintain stable ~30 FPS
+            # Frame rate control : Maintain at approximately 30 FPS
             elapsed = time() - frame_start
             sleep(max(0, FRAME_INTERVAL - elapsed))
         end
     catch err
-        if !isa(err, WebSocketError)
+        if err isa InterruptException
             rethrow(err)
         end
+        # Other errors ( such as Broken Pipe or WebSocketError ) usually indicate that the client has disconnected; simply end the process quietly
     end
 end
 
-#=
-Entrypoint
-=#
+function start()
+    @websocket "/phillips-ocean" ocean_stream_handler
+    
+    @info "Phillips Ocean WebSocket Server started on ws://localhost:8080/phillips-ocean"
+    serve()
+end
 
-serve()
+end # module PhillipsOceanWS
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    PhillipsOceanWS.start()
+end

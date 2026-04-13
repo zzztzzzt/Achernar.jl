@@ -1,5 +1,9 @@
 # Lock File
 package-lock.json
+Manifest.toml
 
 # node_modules
 node_modules
+
+# CUDA.jl
+LocalPreferences.toml

@@ -1,21 +1,23 @@
-authors = ["zzztzzzt <180073683+zzztzzzt@users.noreply.github.com>"]
 name = "Achernar"
 uuid = "f8d700cf-38c9-4d0d-98e8-0b57668e6014"
 version = "0.1.0"
-
-[compat]
-CUDA = "5.11.0"
-HTTP = "1.11.0"
-JSON = "1.5.0"
-Oxygen = "1.10.1"
-StaticArrays = "1.9.18"
+authors = ["zzztzzzt <180073683+zzztzzzt@users.noreply.github.com>"]
 
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 Oxygen = "df9a0d86-3283-4920-82dc-4555fc0d1d8b"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[compat]
+CUDA = "5.11.0"
+HTTP = "1.11.0"
+JSON = "1.5.0"
+Oxygen = "1.10.1"
+Random = "1.11.0"
+StaticArrays = "1.9.18"
 
 [extras]
 CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"

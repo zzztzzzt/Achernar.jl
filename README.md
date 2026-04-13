@@ -71,12 +71,37 @@ julia
 ```shell
 ] activate .
 ```
+
+and hit `backspace`
+
 ```shell
 using CUDA
 ```
 ```shell
 CUDA.set_runtime_version!(v"13.1")
 ```
+
+### If your Custom pkg has new Dependencies :
+
+If you add any new dependencies into local Achernar's `project.toml`, you need to run below command on `every environment` which is using local Achernar ( or it won't auto update )
+
+`julia`
+
+`] activate .`
+
+`dev path/to/project_root/YourNewPkgName`
+
+### Resolve pkg problems :
+
+If your pkg problems still exist, try below command too : 
+
+( it will check the package dependencies )
+
+`julia`
+
+`] activate .`
+
+`resolve`
 
 ## Project Dependencies Details
 

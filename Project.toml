@@ -1,0 +1,6 @@
+[deps]
+Achernar = "f8d700cf-38c9-4d0d-98e8-0b57668e6014"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+
+[extras]
+CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
