@@ -32,8 +32,6 @@ Achernar uses Three.js ( with WebGPU ) & Vite to build frontend 3D Viewer. Three
 
 use below command to start it
 
-go to `./Achernar/`
-
 `julia`
 
 `] activate .`
@@ -42,7 +40,7 @@ go to `./Achernar/`
 
 and hit Ctrl + D
 
-`julia --project=. --threads=auto src/PhillipsOceanWS.jl`
+`julia --project=. --threads=auto scripts/phillips_ocean_server.jl`
 
 at project root, open another CMD
 
