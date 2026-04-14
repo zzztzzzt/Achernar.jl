@@ -1,11 +1,11 @@
 # Achernar.jl
 
-[![GitHub last commit](https://img.shields.io/github/last-commit/zzztzzzt/Achernar.jl.svg)](https://github.com/zzztzzzt/Lyra-AI)
-[![GitHub repo size](https://img.shields.io/github/repo-size/zzztzzzt/Achernar.jl.svg)](https://github.com/zzztzzzt/Lyra-AI)
+[![GitHub last commit](https://img.shields.io/github/last-commit/zzztzzzt/Achernar.jl.svg)](https://github.com/zzztzzzt/Achernar.jl)
+[![GitHub repo size](https://img.shields.io/github/repo-size/zzztzzzt/Achernar.jl.svg)](https://github.com/zzztzzzt/Achernar.jl)
 
 <br>
 
-<img src="https://github.com/zzztzzzt/Achernar.jl/blob/main/logo/logo.png" alt="lyra-logo" style="height: 280px; width: auto;" />
+<img src="https://github.com/zzztzzzt/Achernar.jl/blob/main/logo/logo.png" alt="achernar-logo" style="height: 280px; width: auto;" />
 
 ### Achernar - 3D Physics Simulation for Three.js.
 
