@@ -1,9 +1,6 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import {
-  MeshBasicNodeMaterial,
-  MeshStandardNodeMaterial,
-} from "three/webgpu";
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
 import {
   cross,
   normalize,
@@ -22,24 +19,18 @@ const PLANE_SIZE = 20;
 const HEIGHT_SCALE = 1.35;
 const APP = document.querySelector("#app");
 
-if (!APP) {
-  throw new Error("Missing #app mount element.");
-}
+const ENVELOPE_HEADER_LEN = 17;
+const ENVELOPE_VERSION_V1 = 1;
+const CONTENT_TYPE_FLOAT32_TENSOR = 1;
 
-if (!navigator.gpu) {
-  throw new Error("WebGPU is required for the Phillips ocean viewer.");
-}
+if (!APP) throw new Error("Missing #app mount element.");
+if (!navigator.gpu) throw new Error("WebGPU is required for the Phillips ocean viewer.");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x06111d);
 scene.fog = new THREE.Fog(0x06111d, 24, 52);
 
-const camera = new THREE.PerspectiveCamera(
-  55,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  100,
-);
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100);
 camera.position.set(9, 8, 13);
 camera.lookAt(0, 0, 0);
 
@@ -56,8 +47,7 @@ controls.minDistance = 4;
 controls.maxDistance = 30;
 controls.maxPolarAngle = Math.PI * 0.48;
 
-const ambientLight = new THREE.AmbientLight(0x8db8ff, 0.85);
-scene.add(ambientLight);
+scene.add(new THREE.AmbientLight(0x8db8ff, 0.85));
 
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
 keyLight.position.set(7, 12, 5);
@@ -71,7 +61,7 @@ const planeGeometry = new THREE.PlaneGeometry(
   PLANE_SIZE,
   PLANE_SIZE,
   GRID_RESOLUTION - 1,
-  GRID_RESOLUTION - 1,
+  GRID_RESOLUTION - 1
 );
 planeGeometry.rotateX(-Math.PI / 2);
 
@@ -81,7 +71,7 @@ const heightTexture = new THREE.DataTexture(
   GRID_RESOLUTION,
   GRID_RESOLUTION,
   THREE.RedFormat,
-  THREE.FloatType,
+  THREE.FloatType
 );
 heightTexture.wrapS = THREE.ClampToEdgeWrapping;
 heightTexture.wrapT = THREE.ClampToEdgeWrapping;
@@ -133,7 +123,7 @@ waterMaterial.normalNode = buildNormalNode();
 waterMaterial.colorNode = mix(
   vec3(0.039, 0.165, 0.263),
   vec3(0.49, 0.89, 1.0),
-  heightTextureNode.sample(uv()).r.mul(0.5).add(0.5),
+  heightTextureNode.sample(uv()).r.mul(0.5).add(0.5)
 );
 
 const water = new THREE.Mesh(planeGeometry, waterMaterial);
@@ -157,23 +147,69 @@ function applyHeights(heights) {
   heightTexture.needsUpdate = true;
 }
 
-const socket = new WebSocket("ws://localhost:8080/phillips-ocean");
+function parseEnvelopeV1(arrayBuffer) {
+  if (arrayBuffer.byteLength < ENVELOPE_HEADER_LEN) {
+    throw new Error("Frame too small for envelope v1.");
+  }
+
+  const view = new DataView(arrayBuffer);
+  const version = view.getUint8(0);
+  const contentType = view.getUint16(1, true);
+  const flags = view.getUint16(3, true);
+  const timestampNs = view.getBigUint64(5, true);
+  const payloadLen = view.getUint32(13, true);
+
+  if (version !== ENVELOPE_VERSION_V1) {
+    throw new Error(`Unsupported envelope version: ${version}`);
+  }
+
+  const payloadOffset = ENVELOPE_HEADER_LEN;
+  const payloadEnd = payloadOffset + payloadLen;
+
+  if (arrayBuffer.byteLength !== payloadEnd) {
+    throw new Error("Envelope payload length mismatch.");
+  }
+
+  // IMPORTANT : header is 17 bytes ( not 4-byte aligned ), so we copy payload
+  const payloadBuffer = arrayBuffer.slice(payloadOffset, payloadEnd);
+
+  return { contentType, flags, timestampNs, payloadBuffer };
+}
+
+// WIP : this need to be changed to ws://localhost:8080/phillips-ocean in the future ( also ws needs to be replaaced by wss )
+const socket = new WebSocket("ws://localhost:8080");
 socket.binaryType = "arraybuffer";
+
+socket.addEventListener("open", () => {
+  console.log("Wave socket connected.");
+});
 
 socket.addEventListener("message", (event) => {
   if (!(event.data instanceof ArrayBuffer)) {
     throw new Error("Wave socket payload must be an ArrayBuffer.");
   }
 
-  if (event.data.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
-    throw new Error("Wave socket payload has an invalid byte length.");
+  const frame = parseEnvelopeV1(event.data);
+
+  if (frame.contentType !== CONTENT_TYPE_FLOAT32_TENSOR) {
+    // Ignore unsupported payload type for this viewer
+    return;
   }
 
-  applyHeights(new Float32Array(event.data));
+  if (frame.payloadBuffer.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+    throw new Error("Float32 payload has an invalid byte length.");
+  }
+
+  const heights = new Float32Array(frame.payloadBuffer);
+  applyHeights(heights);
 });
 
 socket.addEventListener("error", () => {
   console.error("Wave socket connection failed.");
+});
+
+socket.addEventListener("close", () => {
+  console.warn("Wave socket closed.");
 });
 
 function onResize() {
@@ -183,15 +219,12 @@ function onResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(width, height);
 }
-
 window.addEventListener("resize", onResize);
 
 function animate() {
   const time = performance.now() / 1000;
-
   water.rotation.y = time * 0.08;
   wireframe.rotation.y = water.rotation.y;
-
   controls.update();
   renderer.render(scene, camera);
 }

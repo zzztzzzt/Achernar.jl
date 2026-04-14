@@ -1,66 +1,52 @@
 module PhillipsOceanFMHUT
 
-using Sockets
+using Fomalhaut
+
 include("PhillipsOcean.jl")
 using .PhillipsOcean
 
-# Cross-platform IPC path
-const SOCKET_PATH = Sys.iswindows() ? 
-    raw"\\.\pipe\phillips_ocean" : 
-    "/tmp/phillips_ocean.sock"
+# Start websocket backend and stream computed frames via Fomalhaut FFI
+function start_server(; host::AbstractString = "127.0.0.1", port::Integer = 8080)
+    Fomalhaut.start_server(host = host, port = port)
+    @info "Fomalhaut WS backend started at ws://$(host):$(port)"
 
-function start_server()
-    # Clean up old sockets ( Windows named pipes do not need rm )
-    if !Sys.iswindows()
-        rm(SOCKET_PATH, force=true)
-    end
-
-    println("Starting Julia IPC Server at: $SOCKET_PATH")
-    server = listen(SOCKET_PATH)
-    @info "Julia IPC Server started successfully ($(Sys.iswindows() ? "Windows Named Pipe" : "Unix Domain Socket"))"
-
+    start_time = time()
     try
         while true
-            conn = accept(server)
-            @info "Rust client connected."
+            frame_start = time()
+            t = frame_start - start_time
 
-            @async begin
-                try
-                    start_time = time()
-                    while isopen(conn)
-                        frame_start = time()
-                        t = frame_start - start_time
+            # Compute frame data in Julia
+            compute_wave!(FRAME_BUFFER, t)
 
-                        compute_wave!(FRAME_BUFFER, t)
+            # Convert Float32 frame buffer to raw bytes and send
+            payload = reinterpret(UInt8, FRAME_BUFFER) |> collect
+            Fomalhaut.send_frame!(
+                payload;
+                content_type = Fomalhaut.CONTENT_TYPE_FLOAT32_TENSOR,
+            )
 
-                        # Send raw binary data to Rust
-                        write(conn, reinterpret(UInt8, FRAME_BUFFER))
-
-                        # Control the frame rate ( ~30 FPS )
-                        elapsed = time() - frame_start
-                        sleep(max(0.0, FRAME_INTERVAL - elapsed))
-                    end
-                catch e
-                    @warn "Connection error: $e"
-                finally
-                    close(conn)
-                end
-            end
+            # Keep target frame rate ( for example ~30 FPS )
+            elapsed = time() - frame_start
+            sleep(max(0.0, FRAME_INTERVAL - elapsed))
         end
     catch e
-        @error "Server error: $e"
+        @error "Streaming loop error: $e"
+        rethrow()
     finally
-        close(server)
-        if !Sys.iswindows()
-            rm(SOCKET_PATH, force=true)
+        # Ensure backend stops on interruption / error
+        try
+            Fomalhaut.stop_server!()
+            @info "Fomalhaut WS backend stopped."
+        catch stop_err
+            @warn "Failed to stop backend cleanly: $stop_err"
         end
-        @info "Julia IPC Server shutdown."
     end
 end
 
-end  # module
+end # module PhillipsOceanFMHUT
 
-# Start the server by executing this file directly
+# Start the stream server when this file is run directly
 if abspath(PROGRAM_FILE) == @__FILE__
     PhillipsOceanFMHUT.start_server()
 end

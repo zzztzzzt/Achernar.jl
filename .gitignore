@@ -1,3 +1,7 @@
+# Fomalhaut Dev Version Folder
+/Fomalhaut/
+/fomalhaut_rs/
+
 # Lock File
 package-lock.json
 Manifest.toml
