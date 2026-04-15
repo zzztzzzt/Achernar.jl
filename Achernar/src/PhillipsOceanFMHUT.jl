@@ -5,14 +5,15 @@ using Fomalhaut
 include("PhillipsOcean.jl")
 using .PhillipsOcean
 
+function wave_stream(ctx)
+    compute_wave!(FRAME_BUFFER, ctx.time)
+    return FRAME_BUFFER 
+end
+
 # Start websocket backend and stream computed frames via Fomalhaut FFI
 function start_server()
-    @stream "/wave" (ctx) -> begin
-        compute_wave!(FRAME_BUFFER, ctx.time)
-        FRAME_BUFFER
-    end
-
-    Fomalhaut.start()
+    @websocket "/wave" wave_stream
+    Fomalhaut.serve(fps=60)
 end
 
 end # module PhillipsOceanFMHUT
