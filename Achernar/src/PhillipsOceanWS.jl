@@ -1,25 +1,3 @@
-"""
-PhillipsOceanWS
-
-WebSocket streaming server for the Phillips Ocean wave simulator.
-Depends on `PhillipsOcean.jl` for all physics computation.
-
-Usage
-
-```julia
-julia --project=. --threads=auto src/PhillipsOceanWS.jl
-```
-
-Endpoint : ws://localhost:8080/phillips-ocean
-
-Each message is a binary frame of `RESOLUTION x RESOLUTION` little-endian
-`Float32` values ( ~36 KB ), pushed at ~30 fps. Client-side access :
-
-```javascript
-const heights = new Float32Array(event.data); // heights[row * 96 + col]
-```
-"""
-
 module PhillipsOceanWS
 
 using Oxygen
