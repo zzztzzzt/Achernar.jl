@@ -12,8 +12,11 @@ end
 
 # Start websocket backend and stream computed frames via Fomalhaut FFI
 function start_server()
-    @websocket "/wave" wave_stream
-    Fomalhaut.serve(fps=60)
+    app = App()
+
+    @websocket app "/phillips-ocean" wave_stream
+
+    Fomalhaut.serve(app; fps=60)
 end
 
 end # module PhillipsOceanFMHUT

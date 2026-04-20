@@ -176,8 +176,8 @@ function parseEnvelopeV1(arrayBuffer) {
   return { contentType, flags, timestampNs, payloadBuffer };
 }
 
-// WIP : this need to be changed to ws://localhost:8080/phillips-ocean in the future ( also ws needs to be replaaced by wss )
-const socket = new WebSocket("ws://localhost:8080");
+// WIP : ws needs to be replaaced by wss in the future
+const socket = new WebSocket("ws://localhost:8080/phillips-ocean");
 socket.binaryType = "arraybuffer";
 
 socket.addEventListener("open", () => {
