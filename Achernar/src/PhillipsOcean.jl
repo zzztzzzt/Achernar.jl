@@ -1,19 +1,3 @@
-"""
-PhillipsOcean
-Computes ocean height via Phillips Spectrum using CUDA.
-Requires a functional CUDA GPU — will error on init if unavailable.
-
-Quick Start :
-1. Setup : `include("PhillipsOcean.jl"); using .PhillipsOcean`
-2. Init : `init!()` is called automatically on load.
-3. Run : `compute_wave!(FRAME_BUFFER, t)` inside your loop.
-        - `t` : Elapsed time in seconds ( Float64 ).
-        - `FRAME_BUFFER` : Vector{Float32} mapped to 2D grid ( Column-major ).
-
-Notes :
-- Configuration : Adjust `const` values ( WIND, AMP, etc. ) in-file and re-include.
-"""
-
 module PhillipsOcean
 
 using Random
@@ -32,7 +16,6 @@ export init!
 #=
 Constants
 =#
-
 const RESOLUTION = 96
 const FRAME_INTERVAL = 1 / 30
 const DOMAIN_SIZE = 36.0f0
@@ -118,10 +101,6 @@ function precompute_phase!()
     end
 end
 
-"""
-    init!()
-Upload precomputed data to the GPU. Errors if CUDA is not functional.
-"""
 function init!()
     CUDA.functional() || error(
         "PhillipsOcean requires a functional CUDA device."
