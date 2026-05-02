@@ -1,24 +1,23 @@
 """
 PhillipsOcean
-Computes ocean height via Phillips Spectrum across CUDA, Multi-threaded, or Serial backends.
+Computes ocean height via Phillips Spectrum using CUDA.
+Requires a functional CUDA GPU — will error on init if unavailable.
 
 Quick Start :
 1. Setup : `include("PhillipsOcean.jl"); using .PhillipsOcean`
-2. Init : `init!()` is called automatically on load to configure GPU/CPU resources.
+2. Init : `init!()` is called automatically on load.
 3. Run : `compute_wave!(FRAME_BUFFER, t)` inside your loop.
         - `t` : Elapsed time in seconds ( Float64 ).
         - `FRAME_BUFFER` : Vector{Float32} mapped to 2D grid ( Column-major ).
 
 Notes :
 - Configuration : Adjust `const` values ( WIND, AMP, etc. ) in-file and re-include.
-- Performance : Run Julia with `--threads auto` for multi-threaded CPU support.
 """
 
 module PhillipsOcean
 
 using Random
 using CUDA
-using Base.Threads
 
 #=
 Public API
@@ -44,10 +43,6 @@ const WIND_SPEED = 14.0f0
 const WIND_DIRECTION = (0.92f0, 0.38f0)
 const AMPLITUDE_SCALE = 0.08f0
 
-# Use Ref to store execution-time state to improve pre-compilation compatibility
-const CUDA_WAVE_ENABLED = Ref(false)
-const ENABLE_THREADED_WAVE = Ref(false)
-
 #=
 Precomputed Storage ( SoA layout )
 =#
@@ -63,7 +58,7 @@ const FRAME_BUFFER = Vector{Float32}(undef, RESOLUTION * RESOLUTION)
 const GRID_X = Float32[((x - 1) / (RESOLUTION - 1) - 0.5f0) * DOMAIN_SIZE for _ in 1:RESOLUTION, x in 1:RESOLUTION]
 const GRID_Y = Float32[((y - 1) / (RESOLUTION - 1) - 0.5f0) * DOMAIN_SIZE for y in 1:RESOLUTION, _ in 1:RESOLUTION]
 
-# GPU mirrors buffer ( using Ref{Any} to avoid attempting to allocate GPU memory during pre-compilation )
+# GPU buffers ( using Ref{Any} to avoid attempting to allocate GPU memory during pre-compilation )
 const d_PHASE_BASE = Ref{Any}(nothing)
 const d_OMEGA = Ref{Any}(nothing)
 const d_AMP = Ref{Any}(nothing)
@@ -124,30 +119,29 @@ function precompute_phase!()
 end
 
 """
-init!()
-Responsible for performing environmental detection and GPU resource uploading
+    init!()
+Upload precomputed data to the GPU. Errors if CUDA is not functional.
 """
 function init!()
-    CUDA_WAVE_ENABLED[] = CUDA.functional()
-    ENABLE_THREADED_WAVE[] = nthreads() > 1
+    CUDA.functional() || error(
+        "PhillipsOcean requires a functional CUDA device."
+    )
 
-    if CUDA_WAVE_ENABLED[]
-        d_PHASE_BASE[] = CuArray(PHASE_BASE)
-        d_OMEGA[] = CuArray(OMEGA)
-        d_AMP[] = CuArray(AMP)
-        d_PHASE0[] = CuArray(PHASE0)
-        d_FRAME_BUFFER[] = CUDA.zeros(Float32, RESOLUTION * RESOLUTION)
-    end
-    
-    @info "PhillipsOcean Initialized" backend=(CUDA_WAVE_ENABLED[] ? "CUDA" : (ENABLE_THREADED_WAVE[] ? "CPU-threaded" : "CPU-serial"))
+    d_PHASE_BASE[] = CuArray(PHASE_BASE)
+    d_OMEGA[] = CuArray(OMEGA)
+    d_AMP[] = CuArray(AMP)
+    d_PHASE0[] = CuArray(PHASE0)
+    d_FRAME_BUFFER[] = CUDA.zeros(Float32, RESOLUTION * RESOLUTION)
+
+    @info "PhillipsOcean Initialized" backend="CUDA"
 end
 
 function __init__()
-    init!() # Automatically perform hardware initialization each time it is used
+    init!()
 end
 
 #=
-Wave Simulation Backends
+CUDA Kernel & Compute
 =#
 function wave_kernel!(frame, phase_base, omega, amp, phase0, tf)
     idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
@@ -161,29 +155,7 @@ function wave_kernel!(frame, phase_base, omega, amp, phase0, tf)
     return nothing
 end
 
-function compute_wave_serial!(data::Vector{Float32}, t::Float64)
-    tf = Float32(t)
-    @inbounds for i in eachindex(data)
-        h = 0.0f0
-        @simd for j in 1:COMPONENT_COUNT
-            @fastmath h += AMP[j] * cos(PHASE_BASE[i, j] - OMEGA[j] * tf + PHASE0[j])
-        end
-        data[i] = h
-    end
-end
-
-function compute_wave_threaded!(data::Vector{Float32}, t::Float64)
-    tf = Float32(t)
-    Threads.@threads for i in eachindex(data)
-        h = 0.0f0
-        @inbounds @simd for j in 1:COMPONENT_COUNT
-            @fastmath h += AMP[j] * cos(PHASE_BASE[i, j] - OMEGA[j] * tf + PHASE0[j])
-        end
-        data[i] = h
-    end
-end
-
-function compute_wave_gpu!(data::Vector{Float32}, t::Float64)
+function compute_wave!(data::Vector{Float32}, t::Float64)
     threads = 256
     blocks  = cld(length(data), threads)
     @cuda threads=threads blocks=blocks wave_kernel!(
@@ -191,16 +163,6 @@ function compute_wave_gpu!(data::Vector{Float32}, t::Float64)
     )
     CUDA.synchronize()
     copyto!(data, d_FRAME_BUFFER[])
-end
-
-function compute_wave!(data::Vector{Float32}, t::Float64)
-    if CUDA_WAVE_ENABLED[]
-        compute_wave_gpu!(data, t)
-    elseif ENABLE_THREADED_WAVE[]
-        compute_wave_threaded!(data, t)
-    else
-        compute_wave_serial!(data, t)
-    end
 end
 
 # CPU data is pre-calculated during the compilation phase
