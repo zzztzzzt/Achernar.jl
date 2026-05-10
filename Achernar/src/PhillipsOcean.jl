@@ -17,7 +17,7 @@ export init!
 Constants
 =#
 const RESOLUTION = 96
-const FRAME_INTERVAL = 1 / 30
+const FRAME_INTERVAL = 1 / 120
 const DOMAIN_SIZE = 36.0f0
 const COMPONENT_COUNT = 128
 
@@ -115,9 +115,6 @@ function init!()
     @info "PhillipsOcean Initialized" backend="CUDA"
 end
 
-function __init__()
-    init!()
-end
 
 #=
 CUDA Kernel & Compute

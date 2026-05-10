@@ -2,8 +2,8 @@ module PhillipsOceanFMHUT
 
 import Fomalhaut as FMHUT
 
-include("PhillipsOcean.jl")
-using .PhillipsOcean
+include("PhillipsOceanAX.jl")
+using .PhillipsOceanAX
 
 function wave_stream(ctx)
     compute_wave!(FRAME_BUFFER, ctx.time)
@@ -12,11 +12,13 @@ end
 
 # Start websocket backend and stream computed frames via Fomalhaut FFI
 function start_server()
+    init!()
+    
     app = FMHUT.App()
 
     @FMHUT.websocket app "/phillips-ocean" wave_stream
 
-    FMHUT.serve(app; fps=60)
+    FMHUT.serve(app; fps=120)
 end
 
 end # module PhillipsOceanFMHUT

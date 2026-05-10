@@ -2,6 +2,10 @@
 /Fomalhaut/
 /fomalhaut_rs/
 
+# Axis Dev Version Folder
+/Axis/
+/axis_rs/
+
 # Lock File
 package-lock.json
 Manifest.toml
