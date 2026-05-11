@@ -57,7 +57,7 @@ function init!()
     AX.init!()
     # Re-upload with our local buffers to ensure GPU uses this module's data
     AX.upload_buffers!(PHASE_BASE, OMEGA, AMP, PHASE0; component_count=COMPONENT_COUNT)
-    @info "PhillipsOcean Initialized" backend="wgpu (Axis)"
+    @info "PhillipsOcean Initialized" backend="wgpu ( Axis )"
 end
 
 
