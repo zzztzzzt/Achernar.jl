@@ -2,7 +2,7 @@ module PhillipsOceanFMHUT
 
 using Libdl
 import Fomalhaut as FMHUT
-import Axis.Ocean as AXOcean
+import Axis as AX
 
 using ..PhillipsOceanAX
 
@@ -12,54 +12,53 @@ export start_server
     start_server()
 
 Start the direct Rust-to-Rust WGPU bridge server.
-No heap allocation in the hot path.
+No heap allocation in the hot path — Julia only drives the timing loop.
 """
 function start_server()
-    # 1. Initialize Axis ocean simulation
+    # 1. Initialize the ocean simulation ( wgpu device + GPU buffers + shader )
     PhillipsOceanAX.init!()
-    
-    # 2. Setup Fomalhaut app
+
+    # 2. Setup Fomalhaut app and register the WebSocket route
     app = FMHUT.App()
-    
-    # Register websocket route
     @FMHUT.websocket app "/phillips-ocean" (ctx) -> nothing
-    
-    # 3. Get Fomalhaut's fmh_ws_broadcast pointer
-    fmhut_lib_path = FMHUT._load_rust_lib()
-    fmhut_handle = Libdl.dlopen(fmhut_lib_path)
+
+    # 3. Wire the Rust-to-Rust broadcast bridge:
+    #    Obtain Fomalhaut's fmh_ws_broadcast C function pointer and register it
+    #    in axis_rs so compute_wave_and_broadcast! can call it directly —
+    #    no Julia involvement in the data path whatsoever.
+    fmhut_handle  = Libdl.dlopen(FMHUT._load_rust_lib())
     broadcast_ptr = Libdl.dlsym(fmhut_handle, :fmh_ws_broadcast)
-    
-    # 4. Set the callback in Axis Rust side
-    AXOcean.axis_set_broadcast_callback(broadcast_ptr)
-    
+    AX.axis_set_broadcast_callback(broadcast_ptr)
+
     @info "Rust-to-Rust Direct Bridge established! Server starting..."
-    
-    # 5. Start Fomalhaut server asynchronously
+
+    # 4. Start Fomalhaut server asynchronously
     @async FMHUT.serve(app; fps=60)
-    
-    # Give server time to bind
-    sleep(0.5)
-    
-    # 6. Run the native simulation loop in Julia
+    sleep(0.5)  # give the server time to bind
+
+    # 5. Main simulation loop
+    #    Julia only controls timing; all data stays inside Rust until the WebSocket.
     try
         start_time = time()
-        interval = 1.0 / 120.0
+        interval   = 1.0 / 60.0
+
         while FMHUT._server_running[]
             frame_start = time()
             t = frame_start - start_time
-            
-            # Dispatch compute, read directly in Rust, package Envelope, and call broadcast
-            AXOcean.compute_wave_and_broadcast!(PhillipsOceanAX._SIM[], t, "/phillips-ocean")
-            
-            elapsed = time() - frame_start
+
+            # Zero Julia allocation:
+            #   pack (Rust) → GPU dispatch → Rust readback → Envelope V1 → broadcast
+            PhillipsOceanAX.compute_wave_and_broadcast!(t, "/phillips-ocean")
+
+            elapsed      = time() - frame_start
             target_sleep = interval - elapsed
-            
-            # Precision sleep for perfectly smooth 120 FPS on Windows
+
+            # Precision sleep: coarse sleep + spin for sub-millisecond accuracy on Windows
             if target_sleep > 0.002
                 sleep(target_sleep - 0.0015)
             end
             while time() - frame_start < interval
-                yield() # Spin for the remaining sub-millisecond precision
+                yield()  # spin for remaining sub-millisecond precision
             end
         end
     catch err
