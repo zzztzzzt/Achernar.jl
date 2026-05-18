@@ -14,7 +14,7 @@ import {
   mix,
 } from "three/tsl";
 
-const GRID_RESOLUTION = 96;
+const GRID_RESOLUTION = 512;
 const PLANE_SIZE = 20;
 const HEIGHT_SCALE = 1.35;
 const APP = document.querySelector("#app");

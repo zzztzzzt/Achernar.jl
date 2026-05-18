@@ -1,8 +1,5 @@
-using Achernar.PhillipsOceanWS
-using Achernar.PhillipsOceanFMHUT
+using Achernar
 
-# Oxygen Server
-#PhillipsOceanWS.start()
+#Achernar.PhillipsOceanOxygen.start()
 
-# Fomalhaut Server
-PhillipsOceanFMHUT.start_server()
+Achernar.PhillipsOceanFMHUT.start_server()

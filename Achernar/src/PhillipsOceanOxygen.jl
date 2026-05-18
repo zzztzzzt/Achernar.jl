@@ -1,4 +1,4 @@
-module PhillipsOceanWS
+module PhillipsOceanOxygen
 
 using Oxygen
 using HTTP
@@ -24,10 +24,10 @@ function ocean_stream_handler(ws)
             
             # Pack with Envelope V1 format
             io = IOBuffer()
-            write(io, UInt8(1))                      # version = 1
-            write(io, htol(UInt16(1)))               # contentType = 1 (Float32 Tensor)
-            write(io, htol(UInt16(0)))               # flags = 0
-            write(io, htol(UInt64(time_ns())))       # timestampNs
+            write(io, UInt8(1)) # version = 1
+            write(io, htol(UInt16(1))) # contentType = 1 (Float32 Tensor)
+            write(io, htol(UInt16(0))) # flags = 0
+            write(io, htol(UInt64(time_ns()))) # timestampNs
             write(io, htol(UInt32(sizeof(FRAME_BUFFER)))) # payloadLen
             write(io, payload)
             
@@ -54,8 +54,8 @@ function start()
     serve()
 end
 
-end # module PhillipsOceanWS
+end # module PhillipsOceanOxygen
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    PhillipsOceanWS.start()
+    PhillipsOceanOxygen.start()
 end

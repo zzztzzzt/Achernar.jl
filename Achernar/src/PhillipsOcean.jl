@@ -1,6 +1,5 @@
 module PhillipsOcean
 
-using Random
 using CUDA
 
 #=
@@ -16,8 +15,8 @@ export init!
 #=
 Constants
 =#
-const RESOLUTION = 96
-const FRAME_INTERVAL = 1 / 120
+const RESOLUTION = 512
+const FRAME_INTERVAL = 1 / 60
 const DOMAIN_SIZE = 36.0f0
 const COMPONENT_COUNT = 128
 
@@ -37,9 +36,9 @@ const PHASE0 = Vector{Float32}(undef, COMPONENT_COUNT)
 const PHASE_BASE = Matrix{Float32}(undef, RESOLUTION * RESOLUTION, COMPONENT_COUNT)
 const FRAME_BUFFER = Vector{Float32}(undef, RESOLUTION * RESOLUTION)
 
-# Grid coordinates
-const GRID_X = Float32[((x - 1) / (RESOLUTION - 1) - 0.5f0) * DOMAIN_SIZE for _ in 1:RESOLUTION, x in 1:RESOLUTION]
-const GRID_Y = Float32[((y - 1) / (RESOLUTION - 1) - 0.5f0) * DOMAIN_SIZE for y in 1:RESOLUTION, _ in 1:RESOLUTION]
+# Grid coordinates (x changes fast, y changes slow, matching WGSL)
+const GRID_X = Float32[((x - 1) / (RESOLUTION - 1) - 0.5f0) * DOMAIN_SIZE for x in 1:RESOLUTION, y in 1:RESOLUTION]
+const GRID_Y = Float32[((y - 1) / (RESOLUTION - 1) - 0.5f0) * DOMAIN_SIZE for x in 1:RESOLUTION, y in 1:RESOLUTION]
 
 # GPU buffers ( using Ref{Any} to avoid attempting to allocate GPU memory during pre-compilation )
 const d_PHASE_BASE = Ref{Any}(nothing)
@@ -57,35 +56,58 @@ function normalize2(x::Float32, y::Float32)
 end
 
 function phillips_spectrum(kx::Float32, ky::Float32, windx::Float32, windy::Float32)
-    k2 = kx * kx + ky * ky
-    k2 < 1.0f-6 && return 0.0f0
-    k = sqrt(k2)
-    alignment = max((kx / k) * windx + (ky / k) * windy, 0.0f0)
-    L = (WIND_SPEED * WIND_SPEED) / GRAVITY
-    l2 = (L * 0.0015f0)^2
-    return exp(-1.0f0 / (k2 * L * L)) / (k2 * k2) * alignment^4 * exp(-k2 * l2)
+    k2 = kx^2 + ky^2
+    k2 == 0f0 && return 0f0
+    k_dir_x, k_dir_y = normalize2(kx, ky)
+    k_dot_w = k_dir_x * windx + k_dir_y * windy
+    k_dot_w < 0f0 && return 0f0
+
+    L = (WIND_SPEED^2) / GRAVITY
+    return (exp(-1f0 / (k2 * L^2)) * (k_dot_w^2)) / (k2^2)
+end
+
+#=
+Minimal xorshift64 RNG ( matches Rust AxisRng for identical numeric output )
+=#
+mutable struct _AxisRng; state::UInt64; end
+_AxisRng(seed::Integer) = _AxisRng(UInt64(max(seed, 1)))
+
+function _next_u32!(r::_AxisRng)::UInt32
+    x = r.state
+    x ⊻= x >> 12; x ⊻= x << 25; x ⊻= x >> 27
+    r.state = x
+    UInt32((x * 0x2545f4914f6cdd1d % typemax(UInt64)) >> 32)
+end
+
+_next_f32!(r::_AxisRng)::Float32 =
+    Float32(_next_u32!(r) >> 8) * (1f0 / Float32(1 << 24))
+
+function _std_normal!(r::_AxisRng)::Float32
+    u1 = max(_next_f32!(r), floatmin(Float32))
+    sqrt(-2f0 * log(u1)) * cos(2f0 * Float32(π) * _next_f32!(r))
 end
 
 #=
 Initialization Logic
 =#
 function build_components!()
-    rng = MersenneTwister(42)
+    rng = _AxisRng(42)
     windx, windy = normalize2(WIND_DIRECTION...)
+    base_angle = atan(windy, windx)
     pair_count = div(COMPONENT_COUNT, 2)
     idx = 1
-    for i in 1:pair_count
-        band = Float32(i - 1) / Float32(pair_count - 1)
+    for i in 0:(pair_count - 1)
+        band = pair_count <= 1 ? 0f0 : Float32(i) / Float32(pair_count - 1)
         wavelength = 1.2f0 + 9.0f0 * band^2
         k = Float32(2 * pi) / wavelength
-        angle = Float32(atan(windy, windx)) + randn(rng, Float32) * 1.05f0 * (0.2f0 + 0.8f0 * band)
+        angle = base_angle + _std_normal!(rng) * 1.05f0 * (0.2f0 + 0.8f0 * band)
         
         # Forward & Backward wave setup
         for (dir, scale) in [(1.0f0, 1.0f0), (-1.0f0, 0.45f0)]
             kx, ky = dir .* (cos(angle) * k, sin(angle) * k)
             spec = phillips_spectrum(kx, ky, windx, windy)
             AMP[idx] = AMPLITUDE_SCALE * scale * sqrt(max(spec, 0f0)) * (0.35f0 + 0.65f0 * (1f0 - band))
-            PHASE0[idx] = rand(rng, Float32) * Float32(2pi)
+            PHASE0[idx] = _next_f32!(rng) * Float32(2pi)
             OMEGA[idx] = sqrt(GRAVITY * k)
             KX[idx], KY[idx] = kx, ky
             idx += 1

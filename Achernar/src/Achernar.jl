@@ -3,8 +3,12 @@ module Achernar
 include("PhillipsOcean.jl")
 using .PhillipsOcean
 
-include("PhillipsOceanWS.jl")
-using .PhillipsOceanWS
+include("PhillipsOceanOxygen.jl")
+using .PhillipsOceanOxygen
+
+include("PhillipsOceanAX.jl")
+using .PhillipsOceanAX
+export PhillipsOceanAX
 
 include("PhillipsOceanFMHUT.jl")
 using .PhillipsOceanFMHUT
