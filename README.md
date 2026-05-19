@@ -48,6 +48,8 @@ activate Julia-Rust FFI :
 
 `julia --project=. scripts/generate_bridge.jl`
 
+`cd axis_rs` + `cargo build --release` + `cd ..`
+
 start server :
 
 `julia --project=. --threads=auto scripts/phillips_ocean_server.jl`

@@ -9,7 +9,7 @@ export RESOLUTION, DOMAIN_SIZE, COMPONENT_COUNT
 export GRAVITY, WIND_SPEED, WIND_DIRECTION, AMPLITUDE_SCALE
 export FRAME_BUFFER
 export normalize2, phillips_spectrum
-export compute_wave!, compute_wave_and_broadcast!, init!
+export compute_wave!, init!
 
 #=
 Constants
@@ -248,7 +248,7 @@ function init!()
     AX.wgpu_create_compute_pipeline!(_PIPELINE_ID, _OCEAN_WGSL, "main", binding_flags)
     AX.wgpu_bind_buffers!(_PIPELINE_ID, [_BUF_FRAME, _BUF_COMPONENTS, _BUF_PARAMS])
 
-    @info "PhillipsOcean Initialized" backend="wgpu (Axis)"
+    @info "PhillipsOcean Initialized" backend="wgpu ( Axis )"
 end
 
 #=
@@ -289,37 +289,6 @@ end
 Convenience overload — writes into `FRAME_BUFFER`.
 """
 compute_wave!(t::Float64) = compute_wave!(FRAME_BUFFER, t)
-
-"""
-    compute_wave_and_broadcast!(t, path)
-
-Dispatch the GPU kernel, readback directly in Rust, pack as Envelope V1,
-and broadcast via the registered Fomalhaut callback.
-No heap allocation in the hot path — all data stays in Rust until the WebSocket.
-"""
-function compute_wave_and_broadcast!(t::Float64, path::String)
-    fc = RESOLUTION * RESOLUTION
-    tf = Float32(t)
-
-    _pack_components!(
-        pointer(KX), pointer(KY), pointer(AMP),
-        pointer(PHASE0), pointer(OMEGA),
-        tf, pointer(_COMPONENTS_BUF), Int32(COMPONENT_COUNT),
-    )
-    _write_params!(
-        pointer(_PARAMS_BUF),
-        UInt32(RESOLUTION), UInt32(COMPONENT_COUNT), tf, DOMAIN_SIZE,
-    )
-
-    AX.wgpu_write_buffer!(_BUF_COMPONENTS, _COMPONENTS_BUF)
-    AX.wgpu_write_buffer!(_BUF_PARAMS,     _PARAMS_BUF)
-    AX.wgpu_dispatch_and_read_broadcast!(
-        _PIPELINE_ID, _BUF_FRAME, path, fc * 4;
-        wg_x = cld(fc, _WORKGROUP_SIZE),
-    )
-
-    return nothing
-end
 
 # CPU component data is pre-calculated during module load ( pure CPU, no GPU needed )
 build_components!()
