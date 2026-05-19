@@ -7,7 +7,7 @@
 
 <img src="https://github.com/zzztzzzt/Achernar.jl/blob/main/logo/logo.png" alt="achernar-logo" style="height: 280px; width: auto;" />
 
-### Achernar - 3D Physics Simulation for Three.js.
+### Achernar - 3D Physics Simulation in Three.js.
 
 IMPORTANT : This project is still in the development and testing stages, licensing terms may be updated in the future. Please don't do any commercial usage currently.
 
@@ -28,7 +28,11 @@ Achernar uses Three.js ( with WebGPU ) & Vite to build frontend 3D Viewer. Three
 
 ![1.0showcase](https://github.com/zzztzzzt/Achernar.jl/blob/main/showcase/Achernar1.0.webp)
 
-## WIP Project Achernar
+## Start 3D Viewer
+
+put below folders to project-root ( from Fomalhaut & Axis project ) :
+
+`Axis`, `axis_rs`, `Fomalhaut`, `fomalhaut_rs`
 
 use below command to start it
 
@@ -40,6 +44,12 @@ use below command to start it
 
 and hit Ctrl + D
 
+activate Julia-Rust FFI :
+
+`julia --project=. scripts/generate_bridge.jl`
+
+start server :
+
 `julia --project=. --threads=auto scripts/phillips_ocean_server.jl`
 
 at project root, open another CMD
@@ -49,6 +59,14 @@ at project root, open another CMD
 `npx vite`
 
 you will see 3D viewer after these steps
+
+## Change GPU Base
+
+you can choose "Oxygen.jl + CUDA.jl" or "Fomalhaut + WGPU"
+
+for example, go to `scripts/phillips_ocean_server.jl`
+
+switch between `Achernar.PhillipsOceanOxygen.start()` & `Achernar.PhillipsOceanFMHUT.start_server()`
 
 ## Project Detail / Debug
 
