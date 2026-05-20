@@ -159,9 +159,10 @@ Rust Hot-Path Functions
 The two functions below replace _pack_components! and _write_params! from the
 old Axis.Ocean implementation. They run every frame and must be zero-alloc.
 Calling @AX.rust_fn:
-  - generates a ccall stub here in Julia (same signature, zero overhead)
+  - generates a private ccall stub here in Julia (same signature, zero overhead)
   - registers the Rust source, grouped under this file's module name
     ( "phillips_ocean_ax" ), ready for AX.generate_bridge().
+Use @AX.call_rust_fn at call sites so Rust-backed calls remain explicit.
 =#
 
 #=
@@ -228,12 +229,12 @@ function init!()
     AX.wgpu_create_buffer!(_BUF_PARAMS,     16,           AX.BINDING_UNIFORM)
 
     # Upload t=0 initial data
-    _pack_components!(
+    @AX.call_rust_fn _pack_components!(
         pointer(KX), pointer(KY), pointer(AMP),
         pointer(PHASE0), pointer(OMEGA),
         0f0, pointer(_COMPONENTS_BUF), Int32(cc),
     )
-    _write_params!(
+    @AX.call_rust_fn _write_params!(
         pointer(_PARAMS_BUF),
         UInt32(RESOLUTION), UInt32(cc), 0f0, DOMAIN_SIZE,
     )
@@ -265,12 +266,12 @@ function compute_wave!(data::Vector{Float32}, t::Float64)
     fc = RESOLUTION * RESOLUTION
     tf = Float32(t)
 
-    _pack_components!(
+    @AX.call_rust_fn _pack_components!(
         pointer(KX), pointer(KY), pointer(AMP),
         pointer(PHASE0), pointer(OMEGA),
         tf, pointer(_COMPONENTS_BUF), Int32(COMPONENT_COUNT),
     )
-    _write_params!(
+    @AX.call_rust_fn _write_params!(
         pointer(_PARAMS_BUF),
         UInt32(RESOLUTION), UInt32(COMPONENT_COUNT), tf, DOMAIN_SIZE,
     )
