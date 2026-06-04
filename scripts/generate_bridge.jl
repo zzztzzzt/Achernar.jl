@@ -13,9 +13,9 @@ Pkg.activate(abspath(joinpath(@__DIR__, "..")))
 using Achernar
 
 import Axis as AX
-axis_generated_dir = abspath(joinpath(@__DIR__, "..", "axis_rs", "src", "generated"))
+axis_generated_dir = abspath(joinpath(@__DIR__, "..", "axis_rs"))
 
 @info "Triggering Axis Rust code generator..." axis_generated_dir
-AX.generate_bridge(axis_generated_dir)
+AX.bridge_up(axis_generated_dir)
 
 @info "Generation complete! Rust files successfully written to: $axis_generated_dir"

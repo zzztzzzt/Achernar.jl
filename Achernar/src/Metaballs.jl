@@ -123,9 +123,9 @@ function init_buffers!()
     THREAD_VERTEX_BUFFERS[] = [Vector{Float32}(undef, thread_mesh_capacity) for _ in 1:thread_slot_count]
     THREAD_NORMAL_BUFFERS[] = [Vector{Float32}(undef, thread_mesh_capacity) for _ in 1:thread_slot_count]
     THREAD_MESH_COUNTS[]    = zeros(Int, thread_slot_count)
-    THREAD_EDGE_X[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
-    THREAD_EDGE_Y[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
-    THREAD_EDGE_Z[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_X[]  = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_Y[]  = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_Z[]  = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
     THREAD_EDGE_NX[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
     THREAD_EDGE_NY[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
     THREAD_EDGE_NZ[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
