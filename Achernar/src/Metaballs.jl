@@ -2,6 +2,7 @@ module Metaballs
 
 using Base.Threads
 using CUDA
+using StaticArrays
 
 #=
 Public API
@@ -14,17 +15,17 @@ export update_physics!, compute_field!, build_mesh!, build_payload!
 #=
 Constants
 =#
-const BALL_COUNT       = 12
-const FRAME_INTERVAL   = 1 / 30
-const SPEED_LIMIT      = 0.008f0
+const BALL_COUNT        = 12
+const FRAME_INTERVAL    = 1 / 30
+const SPEED_LIMIT       = 0.008f0
 
-const GRID_RESOLUTION  = 108
-const GRID_SIZE        = GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION
-const CUBE_COUNT       = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1)
-const MAX_TRIANGLES    = CUBE_COUNT * 5
-const ISOLEVEL         = 80.0f0
-const SUBTRACT         = 8.0f0
-const FIELD_EPSILON    = 1.0f-6
+const GRID_RESOLUTION   = 108
+const GRID_SIZE         = GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION
+const CUBE_COUNT        = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1)
+const MAX_TRIANGLES     = CUBE_COUNT * 5
+const ISOLEVEL          = 80.0f0
+const SUBTRACT          = 8.0f0
+const FIELD_EPSILON     = 1.0f-6
 const THREAD_SLOT_COUNT = max(1, Threads.maxthreadid())
 
 const ENABLE_THREADED_FIELD = nthreads() > 1
@@ -86,21 +87,24 @@ const BLOBS = init_blobs()
 # These CPU-side SoA buffers are reused every frame.
 # We use Ref{Any}(nothing) to prevent 900MB of uninitialized memory 
 # from being serialized into the precompiled .dll.
-const BLOB_X_BUFFER    = Ref{Any}(nothing)
-const BLOB_Y_BUFFER    = Ref{Any}(nothing)
-const BLOB_Z_BUFFER    = Ref{Any}(nothing)
-const BLOB_SIZE_BUFFER = Ref{Any}(nothing)
-const FIELD_BUFFER     = Ref{Any}(nothing)
-const VERTEX_BUFFER    = Ref{Any}(nothing)
-const NORMAL_BUFFER    = Ref{Any}(nothing)
-const PAYLOAD_BUFFER   = Ref{Any}(nothing)
+const BLOB_X_BUFFER    = Ref{Vector{Float32}}(Float32[])
+const BLOB_Y_BUFFER    = Ref{Vector{Float32}}(Float32[])
+const BLOB_Z_BUFFER    = Ref{Vector{Float32}}(Float32[])
+const BLOB_SIZE_BUFFER = Ref{Vector{Float32}}(Float32[])
+const FIELD_BUFFER     = Ref{Vector{Float32}}(Float32[])
+const VERTEX_BUFFER    = Ref{Vector{Float32}}(Float32[])
+const NORMAL_BUFFER    = Ref{Vector{Float32}}(Float32[])
+const PAYLOAD_BUFFER   = Ref{Vector{Float32}}(Float32[])
 
-const THREAD_VERTEX_BUFFERS = Ref{Any}(nothing)
-const THREAD_NORMAL_BUFFERS = Ref{Any}(nothing)
-const THREAD_MESH_COUNTS    = Ref{Any}(nothing)
-const THREAD_EDGE_X = Ref{Any}(nothing)
-const THREAD_EDGE_Y = Ref{Any}(nothing)
-const THREAD_EDGE_Z = Ref{Any}(nothing)
+const THREAD_VERTEX_BUFFERS = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_NORMAL_BUFFERS = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_MESH_COUNTS    = Ref{Vector{Int}}(Int[])
+const THREAD_EDGE_X         = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_Y         = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_Z         = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_NX        = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_NY        = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_NZ        = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
 
 function init_buffers!()
     # Initialize CPU Buffers
@@ -122,6 +126,9 @@ function init_buffers!()
     THREAD_EDGE_X[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
     THREAD_EDGE_Y[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
     THREAD_EDGE_Z[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_NX[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_NY[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_NZ[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
 
     # Initialize GPU Buffers
     _CUDA_ENABLED[] = try
@@ -365,11 +372,10 @@ end
     ax::Float32, ay::Float32, az::Float32,
     bx::Float32, by::Float32, bz::Float32,
     cx::Float32, cy::Float32, cz::Float32,
-)
-    anx, any, anz = sample_gradient(ax, ay, az)
-    bnx, bny, bnz = sample_gradient(bx, by, bz)
-    cnx, cny, cnz = sample_gradient(cx, cy, cz)
-
+    anx::Float32, any::Float32, anz::Float32,
+    bnx::Float32, bny::Float32, bnz::Float32,
+    cnx::Float32, cny::Float32, cnz::Float32,
+) 
     vertices[offset]     = ax * 2.0f0 - 1.0f0
     vertices[offset + 1] = ay * 2.0f0 - 1.0f0
     vertices[offset + 2] = az * 2.0f0 - 1.0f0
@@ -405,6 +411,9 @@ function build_mesh_serial!(vertices::Vector{Float32}, normals::Vector{Float32},
     edge_x = Vector{Float32}(undef, 12)
     edge_y = Vector{Float32}(undef, 12)
     edge_z = Vector{Float32}(undef, 12)
+    edge_nx = Vector{Float32}(undef, 12)
+    edge_ny = Vector{Float32}(undef, 12)
+    edge_nz = Vector{Float32}(undef, 12)
 
     @inbounds for z in 1:(GRID_RESOLUTION - 1)
         z0 = GRID_AXIS[z]
@@ -427,19 +436,13 @@ function build_mesh_serial!(vertices::Vector{Float32}, normals::Vector{Float32},
                 qyz  = grid_index(x,     y + 1, z + 1)
                 q1yz = grid_index(x + 1, y + 1, z + 1)
 
-                cube_values = (
-                    field[q],
-                    field[q1],
-                    field[q1y],
-                    field[qy],
-                    field[qz],
-                    field[q1z],
-                    field[q1yz],
-                    field[qyz],
+                cube_values = SVector{8, Float32}(
+                    field[q], field[q1], field[q1y], field[qy],
+                    field[qz], field[q1z], field[q1yz], field[qyz]
                 )
 
                 cube_index = 0
-                @inbounds for i in 1:8
+                for i in 1:8
                     if cube_values[i] < ISOLEVEL
                         cube_index |= 1 << (i - 1)
                     end
@@ -448,9 +451,9 @@ function build_mesh_serial!(vertices::Vector{Float32}, normals::Vector{Float32},
                 edge_mask = EDGE_TABLE[cube_index + 1]
                 edge_mask == 0 && continue
 
-                cube_x = (x0, x1, x1, x0, x0, x1, x1, x0)
-                cube_y = (y0, y0, y1, y1, y0, y0, y1, y1)
-                cube_z = (z0, z0, z0, z0, z1, z1, z1, z1)
+                cube_x = SVector{8, Float32}(x0, x1, x1, x0, x0, x1, x1, x0)
+                cube_y = SVector{8, Float32}(y0, y0, y1, y1, y0, y0, y1, y1)
+                cube_z = SVector{8, Float32}(z0, z0, z0, z0, z1, z1, z1, z1)
 
                 for edge in 1:12
                     if (edge_mask & (1 << (edge - 1))) == 0
@@ -465,6 +468,11 @@ function build_mesh_serial!(vertices::Vector{Float32}, normals::Vector{Float32},
                     edge_x[edge] = vx
                     edge_y[edge] = vy
                     edge_z[edge] = vz
+                    
+                    nx, ny, nz = sample_gradient(vx, vy, vz)
+                    edge_nx[edge] = nx
+                    edge_ny[edge] = ny
+                    edge_nz[edge] = nz
                 end
 
                 tri_idx = cube_index * 16 + 1
@@ -475,12 +483,13 @@ function build_mesh_serial!(vertices::Vector{Float32}, normals::Vector{Float32},
                     e3 = TRI_TABLE[tri_idx + 2] + 1
 
                     offset = append_triangle!(
-                        vertices,
-                        normals,
-                        offset,
+                        vertices, normals, offset,
                         edge_x[e1], edge_y[e1], edge_z[e1],
                         edge_x[e2], edge_y[e2], edge_z[e2],
                         edge_x[e3], edge_y[e3], edge_z[e3],
+                        edge_nx[e1], edge_ny[e1], edge_nz[e1],
+                        edge_nx[e2], edge_ny[e2], edge_nz[e2],
+                        edge_nx[e3], edge_ny[e3], edge_nz[e3],
                     )
 
                     tri_idx += 3
@@ -502,6 +511,9 @@ function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32
         edge_x = THREAD_EDGE_X[][tid]
         edge_y = THREAD_EDGE_Y[][tid]
         edge_z = THREAD_EDGE_Z[][tid]
+        edge_nx = THREAD_EDGE_NX[][tid]
+        edge_ny = THREAD_EDGE_NY[][tid]
+        edge_nz = THREAD_EDGE_NZ[][tid]
         offset = THREAD_MESH_COUNTS[][tid] + 1
 
         @inbounds begin
@@ -525,15 +537,10 @@ function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32
                     qyz  = grid_index(x,     y + 1, z + 1)
                     q1yz = grid_index(x + 1, y + 1, z + 1)
 
-                    cube_values = (
-                        field[q],
-                        field[q1],
-                        field[q1y],
-                        field[qy],
-                        field[qz],
-                        field[q1z],
-                        field[q1yz],
-                        field[qyz],
+                    # Use SVector ( this is 100% configured on the register, zero heap allocation )
+                    cube_values = SVector{8, Float32}(
+                        field[q], field[q1], field[q1y], field[qy],
+                        field[qz], field[q1z], field[q1yz], field[qyz]
                     )
 
                     cube_index = 0
@@ -546,10 +553,11 @@ function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32
                     edge_mask = EDGE_TABLE[cube_index + 1]
                     edge_mask == 0 && continue
 
-                    cube_x = (x0, x1, x1, x0, x0, x1, x1, x0)
-                    cube_y = (y0, y0, y1, y1, y0, y0, y1, y1)
-                    cube_z = (z0, z0, z0, z0, z1, z1, z1, z1)
+                    cube_x = SVector{8, Float32}(x0, x1, x1, x0, x0, x1, x1, x0)
+                    cube_y = SVector{8, Float32}(y0, y0, y1, y1, y0, y0, y1, y1)
+                    cube_z = SVector{8, Float32}(z0, z0, z0, z0, z1, z1, z1, z1)
 
+                    # Boundary interpolation and normal vector estimation ( calculated only once per edge )
                     for edge in 1:12
                         if (edge_mask & (1 << (edge - 1))) == 0
                             continue
@@ -563,19 +571,32 @@ function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32
                         edge_x[edge] = vx
                         edge_y[edge] = vy
                         edge_z[edge] = vz
+                        
+                        # Once the vertex is calculated, immediately calculate its normal vector and cache it
+                        nx, ny, nz = sample_gradient(vx, vy, vz)
+                        edge_nx[edge] = nx
+                        edge_ny[edge] = ny
+                        edge_nz[edge] = nz
                     end
 
                     tri_idx = cube_index * 16 + 1
 
+                    # Triangle generation ( purely table lookup, extremely fast )
                     while TRI_TABLE[tri_idx] != -1
                         offset + 8 <= length(local_vertices) || error("Thread-local mesh buffer overflow.")
+                        
+                        e1 = TRI_TABLE[tri_idx] + 1
+                        e2 = TRI_TABLE[tri_idx + 1] + 1
+                        e3 = TRI_TABLE[tri_idx + 2] + 1
+
                         offset = append_triangle!(
-                            local_vertices,
-                            local_normals,
-                            offset,
-                            edge_x[TRI_TABLE[tri_idx] + 1],     edge_y[TRI_TABLE[tri_idx] + 1],     edge_z[TRI_TABLE[tri_idx] + 1],
-                            edge_x[TRI_TABLE[tri_idx + 1] + 1], edge_y[TRI_TABLE[tri_idx + 1] + 1], edge_z[TRI_TABLE[tri_idx + 1] + 1],
-                            edge_x[TRI_TABLE[tri_idx + 2] + 1], edge_y[TRI_TABLE[tri_idx + 2] + 1], edge_z[TRI_TABLE[tri_idx + 2] + 1],
+                            local_vertices, local_normals, offset,
+                            edge_x[e1], edge_y[e1], edge_z[e1],
+                            edge_x[e2], edge_y[e2], edge_z[e2],
+                            edge_x[e3], edge_y[e3], edge_z[e3],
+                            edge_nx[e1], edge_ny[e1], edge_nz[e1], # Directly substitute from table
+                            edge_nx[e2], edge_ny[e2], edge_nz[e2],
+                            edge_nx[e3], edge_ny[e3], edge_nz[e3],
                         )
                         tri_idx += 3
                     end
