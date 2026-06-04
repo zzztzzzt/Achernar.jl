@@ -13,4 +13,10 @@ export PhillipsOceanAX
 include("PhillipsOceanFMHUT.jl")
 using .PhillipsOceanFMHUT
 
+include("Metaballs.jl")
+using .Metaballs
+
+include("MetaballsOxygen.jl")
+using .MetaballsOxygen
+
 end # module Achernar

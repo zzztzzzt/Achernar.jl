@@ -1,47 +1,57 @@
-using Oxygen
-using HTTP
-using Random
-using HTTP.WebSockets: WebSocketError, send
+module Metaballs
+
 using Base.Threads
 using CUDA
 
-# Simulation and rendering knobs. `GRID_RESOLUTION` is the main quality/perf lever
-const BALL_COUNT = 12
-const FRAME_INTERVAL = 1 / 30
-const SPEED_LIMIT = 0.008f0
+#=
+Public API
+=#
+export FRAME_INTERVAL, ENABLE_THREADED_FIELD
+export FIELD_BUFFER, VERTEX_BUFFER, NORMAL_BUFFER, PAYLOAD_BUFFER
+export init_buffers!
+export update_physics!, compute_field!, build_mesh!, build_payload!
 
-const GRID_RESOLUTION = 108
-const GRID_SIZE = GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION
-const CUBE_COUNT = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1)
-const MAX_TRIANGLES = CUBE_COUNT * 5
-const ISOLEVEL = 80.0f0
-const SUBTRACT = 8.0f0
-const FIELD_EPSILON = 1.0f-6
+#=
+Constants
+=#
+const BALL_COUNT       = 12
+const FRAME_INTERVAL   = 1 / 30
+const SPEED_LIMIT      = 0.008f0
+
+const GRID_RESOLUTION  = 108
+const GRID_SIZE        = GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION
+const CUBE_COUNT       = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1)
+const MAX_TRIANGLES    = CUBE_COUNT * 5
+const ISOLEVEL         = 80.0f0
+const SUBTRACT         = 8.0f0
+const FIELD_EPSILON    = 1.0f-6
 const THREAD_SLOT_COUNT = max(1, Threads.maxthreadid())
-const CUDA_FIELD_ENABLED = let available = false
-    try
-        # Keep the startup path safe : if CUDA is unavailable, the server falls back to CPU
-        available = CUDA.functional()
-    catch
-        available = false
-    end
-    available
-end
+
 const ENABLE_THREADED_FIELD = nthreads() > 1
-const ENABLE_THREADED_MESH = nthreads() > 1
+const ENABLE_THREADED_MESH  = nthreads() > 1
 
 const GRID_AXIS = Float32[
     (i - 1) / Float32(GRID_RESOLUTION - 1)
     for i in 1:GRID_RESOLUTION
 ]
-# The scalar field is sampled on a fixed unit cube grid; the GPU uses the same axis buffer
-const d_GRID_AXIS = CUDA_FIELD_ENABLED ? CuArray(GRID_AXIS) : nothing
 
 const EDGE_VERTEX_INDICES = (
     (1, 2), (2, 3), (3, 4), (4, 1),
     (5, 6), (6, 7), (7, 8), (8, 5),
     (1, 5), (2, 6), (3, 7), (4, 8),
 )
+
+#=
+GPU buffers — Ref{Any}(nothing) avoids allocating GPU memory during precompilation.
+Populated by init_gpu_buffers!() at runtime.
+=#
+const _CUDA_ENABLED  = Ref(false)
+const d_GRID_AXIS    = Ref{Any}(nothing)
+const d_FIELD_BUFFER = Ref{Any}(nothing)
+const d_BLOB_X       = Ref{Any}(nothing)
+const d_BLOB_Y       = Ref{Any}(nothing)
+const d_BLOB_Z       = Ref{Any}(nothing)
+const d_BLOB_SIZE    = Ref{Any}(nothing)
 
 include("utils/MarchingCubesTables.jl")
 
@@ -72,27 +82,63 @@ function init_blobs()
 end
 
 const BLOBS = init_blobs()
-# These CPU-side SoA buffers are reused every frame before uploading blob state to the GPU
-const BLOB_X_BUFFER = zeros(Float32, BALL_COUNT)
-const BLOB_Y_BUFFER = zeros(Float32, BALL_COUNT)
-const BLOB_Z_BUFFER = zeros(Float32, BALL_COUNT)
-const BLOB_SIZE_BUFFER = zeros(Float32, BALL_COUNT)
-const FIELD_BUFFER = Vector{Float32}(undef, GRID_SIZE)
-const VERTEX_BUFFER = Vector{Float32}(undef, MAX_TRIANGLES * 9)
-const NORMAL_BUFFER = Vector{Float32}(undef, MAX_TRIANGLES * 9)
-const PAYLOAD_BUFFER = Vector{Float32}(undef, 1 + MAX_TRIANGLES * 18)
-const d_FIELD_BUFFER = CUDA_FIELD_ENABLED ? CUDA.zeros(Float32, GRID_SIZE) : nothing
-const d_BLOB_X = CUDA_FIELD_ENABLED ? CUDA.zeros(Float32, BALL_COUNT) : nothing
-const d_BLOB_Y = CUDA_FIELD_ENABLED ? CUDA.zeros(Float32, BALL_COUNT) : nothing
-const d_BLOB_Z = CUDA_FIELD_ENABLED ? CUDA.zeros(Float32, BALL_COUNT) : nothing
-const d_BLOB_SIZE = CUDA_FIELD_ENABLED ? CUDA.zeros(Float32, BALL_COUNT) : nothing
-const THREAD_MESH_FLOAT_CAPACITY = max(9, cld(MAX_TRIANGLES * 9, THREAD_SLOT_COUNT) * 2)
-const THREAD_VERTEX_BUFFERS = [Vector{Float32}(undef, THREAD_MESH_FLOAT_CAPACITY) for _ in 1:THREAD_SLOT_COUNT]
-const THREAD_NORMAL_BUFFERS = [Vector{Float32}(undef, THREAD_MESH_FLOAT_CAPACITY) for _ in 1:THREAD_SLOT_COUNT]
-const THREAD_MESH_COUNTS = zeros(Int, THREAD_SLOT_COUNT)
-const THREAD_EDGE_X = [Vector{Float32}(undef, 12) for _ in 1:THREAD_SLOT_COUNT]
-const THREAD_EDGE_Y = [Vector{Float32}(undef, 12) for _ in 1:THREAD_SLOT_COUNT]
-const THREAD_EDGE_Z = [Vector{Float32}(undef, 12) for _ in 1:THREAD_SLOT_COUNT]
+
+# These CPU-side SoA buffers are reused every frame.
+# We use Ref{Any}(nothing) to prevent 900MB of uninitialized memory 
+# from being serialized into the precompiled .dll.
+const BLOB_X_BUFFER    = Ref{Any}(nothing)
+const BLOB_Y_BUFFER    = Ref{Any}(nothing)
+const BLOB_Z_BUFFER    = Ref{Any}(nothing)
+const BLOB_SIZE_BUFFER = Ref{Any}(nothing)
+const FIELD_BUFFER     = Ref{Any}(nothing)
+const VERTEX_BUFFER    = Ref{Any}(nothing)
+const NORMAL_BUFFER    = Ref{Any}(nothing)
+const PAYLOAD_BUFFER   = Ref{Any}(nothing)
+
+const THREAD_VERTEX_BUFFERS = Ref{Any}(nothing)
+const THREAD_NORMAL_BUFFERS = Ref{Any}(nothing)
+const THREAD_MESH_COUNTS    = Ref{Any}(nothing)
+const THREAD_EDGE_X = Ref{Any}(nothing)
+const THREAD_EDGE_Y = Ref{Any}(nothing)
+const THREAD_EDGE_Z = Ref{Any}(nothing)
+
+function init_buffers!()
+    # Initialize CPU Buffers
+    BLOB_X_BUFFER[]    = zeros(Float32, BALL_COUNT)
+    BLOB_Y_BUFFER[]    = zeros(Float32, BALL_COUNT)
+    BLOB_Z_BUFFER[]    = zeros(Float32, BALL_COUNT)
+    BLOB_SIZE_BUFFER[] = zeros(Float32, BALL_COUNT)
+    FIELD_BUFFER[]     = Vector{Float32}(undef, GRID_SIZE)
+    VERTEX_BUFFER[]    = Vector{Float32}(undef, MAX_TRIANGLES * 9)
+    NORMAL_BUFFER[]    = Vector{Float32}(undef, MAX_TRIANGLES * 9)
+    PAYLOAD_BUFFER[]   = Vector{Float32}(undef, 1 + MAX_TRIANGLES * 18)
+
+    thread_slot_count = max(1, Threads.maxthreadid())
+    thread_mesh_capacity = max(9, cld(MAX_TRIANGLES * 9, thread_slot_count) * 2)
+
+    THREAD_VERTEX_BUFFERS[] = [Vector{Float32}(undef, thread_mesh_capacity) for _ in 1:thread_slot_count]
+    THREAD_NORMAL_BUFFERS[] = [Vector{Float32}(undef, thread_mesh_capacity) for _ in 1:thread_slot_count]
+    THREAD_MESH_COUNTS[]    = zeros(Int, thread_slot_count)
+    THREAD_EDGE_X[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_Y[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_Z[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+
+    # Initialize GPU Buffers
+    _CUDA_ENABLED[] = try
+        CUDA.functional()
+    catch
+        false
+    end
+
+    if _CUDA_ENABLED[]
+        d_GRID_AXIS[]    = CuArray(GRID_AXIS)
+        d_FIELD_BUFFER[] = CUDA.zeros(Float32, GRID_SIZE)
+        d_BLOB_X[]       = CUDA.zeros(Float32, BALL_COUNT)
+        d_BLOB_Y[]       = CUDA.zeros(Float32, BALL_COUNT)
+        d_BLOB_Z[]       = CUDA.zeros(Float32, BALL_COUNT)
+        d_BLOB_SIZE[]    = CUDA.zeros(Float32, BALL_COUNT)
+    end
+end
 
 @inline grid_index(x::Int, y::Int, z::Int) = x + (y - 1) * GRID_RESOLUTION + (z - 1) * GRID_RESOLUTION * GRID_RESOLUTION
 
@@ -184,10 +230,10 @@ function update_blob_buffers!()
     # Copy the mutable blob structs into flat arrays before the GPU upload
     @inbounds for i in 1:BALL_COUNT
         blob = BLOBS[i]
-        BLOB_X_BUFFER[i] = blob.x
-        BLOB_Y_BUFFER[i] = blob.y
-        BLOB_Z_BUFFER[i] = blob.z
-        BLOB_SIZE_BUFFER[i] = blob.size
+        BLOB_X_BUFFER[][i]    = blob.x
+        BLOB_Y_BUFFER[][i]    = blob.y
+        BLOB_Z_BUFFER[][i]    = blob.z
+        BLOB_SIZE_BUFFER[][i] = blob.size
     end
 end
 
@@ -243,13 +289,11 @@ function compute_field_threaded!(field::Vector{Float32})
 end
 
 function compute_field_gpu!(field::Vector{Float32})
-    # GPU acceleration is intentionally limited to field evaluation; this keeps the mesh path identical
-    # to the known-good CPU implementation and avoids a second source of rendering regressions
     update_blob_buffers!()
-    copyto!(d_BLOB_X, BLOB_X_BUFFER)
-    copyto!(d_BLOB_Y, BLOB_Y_BUFFER)
-    copyto!(d_BLOB_Z, BLOB_Z_BUFFER)
-    copyto!(d_BLOB_SIZE, BLOB_SIZE_BUFFER)
+    copyto!(d_BLOB_X[], BLOB_X_BUFFER[])
+    copyto!(d_BLOB_Y[], BLOB_Y_BUFFER[])
+    copyto!(d_BLOB_Z[], BLOB_Z_BUFFER[])
+    copyto!(d_BLOB_SIZE[], BLOB_SIZE_BUFFER[])
 
     threads = (8, 8, 8)
     blocks = (
@@ -257,14 +301,13 @@ function compute_field_gpu!(field::Vector{Float32})
         cld(GRID_RESOLUTION, threads[2]),
         cld(GRID_RESOLUTION, threads[3]),
     )
-    @cuda threads=threads blocks=blocks field_kernel!(d_FIELD_BUFFER, d_GRID_AXIS, d_BLOB_X, d_BLOB_Y, d_BLOB_Z, d_BLOB_SIZE)
+    @cuda threads=threads blocks=blocks field_kernel!(d_FIELD_BUFFER[], d_GRID_AXIS[], d_BLOB_X[], d_BLOB_Y[], d_BLOB_Z[], d_BLOB_SIZE[])
     CUDA.synchronize()
-    copyto!(field, d_FIELD_BUFFER)
+    copyto!(field, d_FIELD_BUFFER[])
 end
 
 function compute_field!(field::Vector{Float32})
-    # Prefer CUDA when available, then threaded CPU, then the single-threaded fallback
-    if CUDA_FIELD_ENABLED
+    if _CUDA_ENABLED[]
         compute_field_gpu!(field)
     elseif ENABLE_THREADED_FIELD
         compute_field_threaded!(field)
@@ -274,7 +317,6 @@ function compute_field!(field::Vector{Float32})
 end
 
 @inline function sample_gradient(x::Float32, y::Float32, z::Float32)
-    # Normals are estimated from the analytic metaball field instead of face normals for smoother shading
     gx = 0.0f0
     gy = 0.0f0
     gz = 0.0f0
@@ -324,12 +366,11 @@ end
     bx::Float32, by::Float32, bz::Float32,
     cx::Float32, cy::Float32, cz::Float32,
 )
-    # Marching Cubes works in [0, 1] grid space; remap to [-1, 1] before sending to Three.js
     anx, any, anz = sample_gradient(ax, ay, az)
     bnx, bny, bnz = sample_gradient(bx, by, bz)
     cnx, cny, cnz = sample_gradient(cx, cy, cz)
 
-    vertices[offset] = ax * 2.0f0 - 1.0f0
+    vertices[offset]     = ax * 2.0f0 - 1.0f0
     vertices[offset + 1] = ay * 2.0f0 - 1.0f0
     vertices[offset + 2] = az * 2.0f0 - 1.0f0
     vertices[offset + 3] = bx * 2.0f0 - 1.0f0
@@ -339,7 +380,7 @@ end
     vertices[offset + 7] = cy * 2.0f0 - 1.0f0
     vertices[offset + 8] = cz * 2.0f0 - 1.0f0
 
-    normals[offset] = anx
+    normals[offset]     = anx
     normals[offset + 1] = any
     normals[offset + 2] = anz
     normals[offset + 3] = bnx
@@ -377,13 +418,13 @@ function build_mesh_serial!(vertices::Vector{Float32}, normals::Vector{Float32},
                 x0 = GRID_AXIS[x]
                 x1 = GRID_AXIS[x + 1]
 
-                q = grid_index(x, y, z)
-                q1 = grid_index(x + 1, y, z)
-                qy = grid_index(x, y + 1, z)
-                q1y = grid_index(x + 1, y + 1, z)
-                qz = grid_index(x, y, z + 1)
-                q1z = grid_index(x + 1, y, z + 1)
-                qyz = grid_index(x, y + 1, z + 1)
+                q    = grid_index(x,     y,     z)
+                q1   = grid_index(x + 1, y,     z)
+                qy   = grid_index(x,     y + 1, z)
+                q1y  = grid_index(x + 1, y + 1, z)
+                qz   = grid_index(x,     y,     z + 1)
+                q1z  = grid_index(x + 1, y,     z + 1)
+                qyz  = grid_index(x,     y + 1, z + 1)
                 q1yz = grid_index(x + 1, y + 1, z + 1)
 
                 cube_values = (
@@ -452,17 +493,16 @@ function build_mesh_serial!(vertices::Vector{Float32}, normals::Vector{Float32},
 end
 
 function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32}, field::Vector{Float32})
-    # Each worker writes into its own buffers first, then we stitch the final stream together once
-    fill!(THREAD_MESH_COUNTS, 0)
+    fill!(THREAD_MESH_COUNTS[], 0)
 
     @threads for z in 1:(GRID_RESOLUTION - 1)
         tid = threadid()
-        local_vertices = THREAD_VERTEX_BUFFERS[tid]
-        local_normals = THREAD_NORMAL_BUFFERS[tid]
-        edge_x = THREAD_EDGE_X[tid]
-        edge_y = THREAD_EDGE_Y[tid]
-        edge_z = THREAD_EDGE_Z[tid]
-        offset = THREAD_MESH_COUNTS[tid] + 1
+        local_vertices = THREAD_VERTEX_BUFFERS[][tid]
+        local_normals  = THREAD_NORMAL_BUFFERS[][tid]
+        edge_x = THREAD_EDGE_X[][tid]
+        edge_y = THREAD_EDGE_Y[][tid]
+        edge_z = THREAD_EDGE_Z[][tid]
+        offset = THREAD_MESH_COUNTS[][tid] + 1
 
         @inbounds begin
             z0 = GRID_AXIS[z]
@@ -476,13 +516,13 @@ function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32
                     x0 = GRID_AXIS[x]
                     x1 = GRID_AXIS[x + 1]
 
-                    q = grid_index(x, y, z)
-                    q1 = grid_index(x + 1, y, z)
-                    qy = grid_index(x, y + 1, z)
-                    q1y = grid_index(x + 1, y + 1, z)
-                    qz = grid_index(x, y, z + 1)
-                    q1z = grid_index(x + 1, y, z + 1)
-                    qyz = grid_index(x, y + 1, z + 1)
+                    q    = grid_index(x,     y,     z)
+                    q1   = grid_index(x + 1, y,     z)
+                    qy   = grid_index(x,     y + 1, z)
+                    q1y  = grid_index(x + 1, y + 1, z)
+                    qz   = grid_index(x,     y,     z + 1)
+                    q1z  = grid_index(x + 1, y,     z + 1)
+                    qyz  = grid_index(x,     y + 1, z + 1)
                     q1yz = grid_index(x + 1, y + 1, z + 1)
 
                     cube_values = (
@@ -528,12 +568,12 @@ function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32
                     tri_idx = cube_index * 16 + 1
 
                     while TRI_TABLE[tri_idx] != -1
-                        offset + 8 <= length(local_vertices) || error("Thread-local mesh buffer overflow; increase THREAD_MESH_FLOAT_CAPACITY.")
+                        offset + 8 <= length(local_vertices) || error("Thread-local mesh buffer overflow.")
                         offset = append_triangle!(
                             local_vertices,
                             local_normals,
                             offset,
-                            edge_x[TRI_TABLE[tri_idx] + 1], edge_y[TRI_TABLE[tri_idx] + 1], edge_z[TRI_TABLE[tri_idx] + 1],
+                            edge_x[TRI_TABLE[tri_idx] + 1],     edge_y[TRI_TABLE[tri_idx] + 1],     edge_z[TRI_TABLE[tri_idx] + 1],
                             edge_x[TRI_TABLE[tri_idx + 1] + 1], edge_y[TRI_TABLE[tri_idx + 1] + 1], edge_z[TRI_TABLE[tri_idx + 1] + 1],
                             edge_x[TRI_TABLE[tri_idx + 2] + 1], edge_y[TRI_TABLE[tri_idx + 2] + 1], edge_z[TRI_TABLE[tri_idx + 2] + 1],
                         )
@@ -543,16 +583,16 @@ function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32
             end
         end
 
-        THREAD_MESH_COUNTS[tid] = offset - 1
+        THREAD_MESH_COUNTS[][tid] = offset - 1
     end
 
     offset = 1
     for tid in 1:THREAD_SLOT_COUNT
-        count = THREAD_MESH_COUNTS[tid]
+        count = THREAD_MESH_COUNTS[][tid]
         count == 0 && continue
-        offset + count - 1 <= length(vertices) || error("Global mesh buffer overflow; increase MAX_TRIANGLES.")
-        copyto!(vertices, offset, THREAD_VERTEX_BUFFERS[tid], 1, count)
-        copyto!(normals, offset, THREAD_NORMAL_BUFFERS[tid], 1, count)
+        offset + count - 1 <= length(vertices) || error("Global mesh buffer overflow.")
+        copyto!(vertices, offset, THREAD_VERTEX_BUFFERS[][tid], 1, count)
+        copyto!(normals,  offset, THREAD_NORMAL_BUFFERS[][tid], 1, count)
         offset += count
     end
 
@@ -565,39 +605,10 @@ function build_payload!(
     normals::Vector{Float32},
     vertex_float_count::Int,
 )
-    # Payload layout : [vertex_float_count, positions..., normals...]
     payload[1] = Float32(vertex_float_count)
     copyto!(payload, 2, vertices, 1, vertex_float_count)
     copyto!(payload, 2 + vertex_float_count, normals, 1, vertex_float_count)
     return reinterpret(UInt8, @view payload[1:(1 + vertex_float_count * 2)])
 end
 
-@websocket "/metaballs" function(ws::HTTP.WebSocket)
-    println("Client connected")
-    start_time = time()
-
-    try
-        while true
-            frame_start = time()
-            elapsed_total = frame_start - start_time
-
-            # The frame loop stays intentionally simple : update motion, sample the field, build the mesh, stream it
-            update_physics!(elapsed_total)
-            compute_field!(FIELD_BUFFER)
-            vertex_float_count = build_mesh!(VERTEX_BUFFER, NORMAL_BUFFER, FIELD_BUFFER)
-            payload = build_payload!(PAYLOAD_BUFFER, VERTEX_BUFFER, NORMAL_BUFFER, vertex_float_count)
-            send(ws, payload)
-
-            elapsed_frame = time() - frame_start
-            sleep(max(0, FRAME_INTERVAL - elapsed_frame))
-        end
-    catch err
-        if !isa(err, WebSocketError) && !(err isa IOError && err.code == Base.UV_ECANCELED)
-            @error "Julia WS Error" exception = err
-        end
-    end
-end
-
-println("Julia Server [FractureSphere Mesh Stream] running on http://localhost:8080")
-println(CUDA_FIELD_ENABLED ? "Field compute backend: CUDA.jl" : "Field compute backend: CPU")
-serve(port = 8080)
+end # module Metaballs
