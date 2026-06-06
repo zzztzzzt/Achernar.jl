@@ -19,4 +19,11 @@ using .Metaballs
 include("MetaballsOxygen.jl")
 using .MetaballsOxygen
 
+include("MetaballsAX.jl")
+using .MetaballsAX
+export MetaballsAX
+
+include("MetaballsFMHUT.jl")
+using .MetaballsFMHUT
+
 end # module Achernar

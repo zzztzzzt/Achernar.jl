@@ -49,8 +49,47 @@ scene.add(blobMesh);
 
 let pendingBuffer = null;
 
+const ENVELOPE_HEADER_LEN = 17;
+const ENVELOPE_VERSION_V1 = 1;
+const CONTENT_TYPE_FLOAT32_TENSOR = 1;
+
+function parseEnvelopeV1(arrayBuffer) {
+  if (arrayBuffer.byteLength < ENVELOPE_HEADER_LEN) {
+    throw new Error("Frame too small for envelope v1.");
+  }
+
+  const view = new DataView(arrayBuffer);
+  const version = view.getUint8(0);
+  const contentType = view.getUint16(1, true);
+  const flags = view.getUint16(3, true);
+  const timestampNs = view.getBigUint64(5, true);
+  const payloadLen = view.getUint32(13, true);
+
+  if (version !== ENVELOPE_VERSION_V1) {
+    throw new Error(`Unsupported envelope version: ${version}`);
+  }
+
+  const payloadOffset = ENVELOPE_HEADER_LEN;
+  const payloadEnd = payloadOffset + payloadLen;
+
+  if (arrayBuffer.byteLength !== payloadEnd) {
+    throw new Error("Envelope payload length mismatch.");
+  }
+
+  // Copy payload to new buffer for 4-byte alignment
+  const payloadBuffer = arrayBuffer.slice(payloadOffset, payloadEnd);
+
+  return { contentType, flags, timestampNs, payloadBuffer };
+}
+
 function updateGeometry(buffer) {
-  const data = new Float32Array(buffer);
+  const frame = parseEnvelopeV1(buffer);
+  
+  if (frame.contentType !== CONTENT_TYPE_FLOAT32_TENSOR) {
+    return;
+  }
+
+  const data = new Float32Array(frame.payloadBuffer);
   if (data.length === 0) return;
 
   const vertexFloatCount = Math.round(data[0]);
