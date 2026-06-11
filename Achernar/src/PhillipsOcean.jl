@@ -2,9 +2,7 @@ module PhillipsOcean
 
 using CUDA
 
-#=
-Public API
-=#
+# Public API
 export RESOLUTION, FRAME_INTERVAL, DOMAIN_SIZE, COMPONENT_COUNT
 export GRAVITY, WIND_SPEED, WIND_DIRECTION, AMPLITUDE_SCALE
 export FRAME_BUFFER
@@ -12,9 +10,7 @@ export normalize2, phillips_spectrum
 export compute_wave!
 export init!
 
-#=
-Constants
-=#
+# Constants
 const RESOLUTION = 512
 const FRAME_INTERVAL = 1 / 60
 const DOMAIN_SIZE = 36.0f0
@@ -25,9 +21,7 @@ const WIND_SPEED = 14.0f0
 const WIND_DIRECTION = (0.92f0, 0.38f0)
 const AMPLITUDE_SCALE = 0.08f0
 
-#=
-Precomputed Storage ( SoA layout )
-=#
+# Precomputed Storage ( SoA layout )
 const KX = Vector{Float32}(undef, COMPONENT_COUNT)
 const KY = Vector{Float32}(undef, COMPONENT_COUNT)
 const OMEGA = Vector{Float32}(undef, COMPONENT_COUNT)
@@ -47,9 +41,7 @@ const d_AMP = Ref{Any}(nothing)
 const d_PHASE0 = Ref{Any}(nothing)
 const d_FRAME_BUFFER = Ref{Any}(nothing)
 
-#=
-Utility Functions
-=#
+# Utility Functions
 function normalize2(x::Float32, y::Float32)
     len = sqrt(x * x + y * y)
     return len < 1f-6 ? (0f0, 0f0) : (x / len, y / len)
@@ -66,9 +58,7 @@ function phillips_spectrum(kx::Float32, ky::Float32, windx::Float32, windy::Floa
     return (exp(-1f0 / (k2 * L^2)) * (k_dot_w^2)) / (k2^2)
 end
 
-#=
-Minimal xorshift64 RNG ( matches Rust AxisRng for identical numeric output )
-=#
+# Minimal xorshift64 RNG ( matches Rust AxisRng for identical numeric output )
 mutable struct _AxisRng; state::UInt64; end
 _AxisRng(seed::Integer) = _AxisRng(UInt64(max(seed, 1)))
 
@@ -87,9 +77,7 @@ function _std_normal!(r::_AxisRng)::Float32
     sqrt(-2f0 * log(u1)) * cos(2f0 * Float32(π) * _next_f32!(r))
 end
 
-#=
-Initialization Logic
-=#
+# Initialization Logic
 function build_components!()
     rng = _AxisRng(42)
     windx, windy = normalize2(WIND_DIRECTION...)
@@ -138,9 +126,7 @@ function init!()
 end
 
 
-#=
-CUDA Kernel & Compute
-=#
+# CUDA Kernel & Compute
 function wave_kernel!(frame, phase_base, omega, amp, phase0, tf)
     idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if idx <= length(frame)
@@ -155,7 +141,7 @@ end
 
 function compute_wave!(data::Vector{Float32}, t::Float64)
     threads = 256
-    blocks  = cld(length(data), threads)
+    blocks = cld(length(data), threads)
     @cuda threads=threads blocks=blocks wave_kernel!(
         d_FRAME_BUFFER[], d_PHASE_BASE[], d_OMEGA[], d_AMP[], d_PHASE0[], Float32(t)
     )

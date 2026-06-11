@@ -2,51 +2,45 @@ module PhillipsOceanAX
 
 import Axis as AX
 
-#=
-Public API
-=#
+# Public API
 export RESOLUTION, DOMAIN_SIZE, COMPONENT_COUNT
 export GRAVITY, WIND_SPEED, WIND_DIRECTION, AMPLITUDE_SCALE
 export FRAME_BUFFER
 export normalize2, phillips_spectrum
 export compute_wave!, init!
 
-#=
-Constants
-=#
-const RESOLUTION      = 512
-const DOMAIN_SIZE     = 36.0f0
+# Constants
+const RESOLUTION = 512
+const DOMAIN_SIZE = 36.0f0
 const COMPONENT_COUNT = 128
 
-const GRAVITY         = 9.81f0
-const WIND_SPEED      = 14.0f0
-const WIND_DIRECTION  = (0.92f0, 0.38f0)
+const GRAVITY = 9.81f0
+const WIND_SPEED = 14.0f0
+const WIND_DIRECTION = (0.92f0, 0.38f0)
 const AMPLITUDE_SCALE = 0.08f0
 
-#=
-GPU resource IDs ( fixed, single-simulation module )
-=#
-const _BUF_FRAME      = 1
+# GPU resource IDs ( fixed, single-simulation module )
+const _BUF_FRAME = 1
 const _BUF_COMPONENTS = 2
-const _BUF_PARAMS     = 3
-const _PIPELINE_ID    = 1
+const _BUF_PARAMS = 3
+const _PIPELINE_ID = 1
 const _WORKGROUP_SIZE = 256
 
 #=
 Precomputed Storage ( SoA layout )
 Mirrors PhillipsOcean.jl — pre-allocated once, zero GC in hot path.
 =#
-const KX     = Vector{Float32}(undef, COMPONENT_COUNT)
-const KY     = Vector{Float32}(undef, COMPONENT_COUNT)
-const OMEGA  = Vector{Float32}(undef, COMPONENT_COUNT)
-const AMP    = Vector{Float32}(undef, COMPONENT_COUNT)
+const KX = Vector{Float32}(undef, COMPONENT_COUNT)
+const KY = Vector{Float32}(undef, COMPONENT_COUNT)
+const OMEGA = Vector{Float32}(undef, COMPONENT_COUNT)
+const AMP = Vector{Float32}(undef, COMPONENT_COUNT)
 const PHASE0 = Vector{Float32}(undef, COMPONENT_COUNT)
 
 const FRAME_BUFFER = Vector{Float32}(undef, RESOLUTION * RESOLUTION)
 
 # Reusable frame-level scratch buffers ( avoids any per-frame allocation )
 const _COMPONENTS_BUF = Vector{Float32}(undef, COMPONENT_COUNT * 4)
-const _PARAMS_BUF     = Vector{UInt8}(undef, 16)
+const _PARAMS_BUF = Vector{UInt8}(undef, 16)
 
 #=
 WGSL compute shader ( Phillips Ocean kernel )
@@ -85,9 +79,7 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
 }
 """
 
-#=
-Utility Functions
-=#
+# Utility Functions
 function normalize2(x::Float32, y::Float32)
     len = sqrt(x * x + y * y)
     return len < 1f-6 ? (0f0, 0f0) : (x / len, y / len)
@@ -96,16 +88,14 @@ end
 function phillips_spectrum(kx::Float32, ky::Float32, windx::Float32, windy::Float32)
     k2 = kx^2 + ky^2
     k2 == 0f0 && return 0f0
-    k         = sqrt(k2)
+    k = sqrt(k2)
     alignment = max((kx / k) * windx + (ky / k) * windy, 0f0)
-    L         = (WIND_SPEED * WIND_SPEED) / GRAVITY
-    l2_small  = (L * 0.0015f0)^2
+    L = (WIND_SPEED * WIND_SPEED) / GRAVITY
+    l2_small = (L * 0.0015f0)^2
     exp(-1f0 / (k2 * L * L)) / (k2 * k2) * alignment^4 * exp(-k2 * l2_small)
 end
 
-#=
-Minimal xorshift64 RNG ( matches Rust AxisRng for identical numeric output )
-=#
+# Minimal xorshift64 RNG ( matches Rust AxisRng for identical numeric output )
 mutable struct _AxisRng; state::UInt64; end
 _AxisRng(seed::Integer) = _AxisRng(UInt64(max(seed, 1)))
 
@@ -136,19 +126,19 @@ function build_components!()
     pair_count = div(COMPONENT_COUNT, 2)
     idx = 1
     @inbounds for i in 0:(pair_count - 1)
-        band  = pair_count <= 1 ? 0f0 : Float32(i) / Float32(pair_count - 1)
-        k     = 2f0 * Float32(π) / (1.2f0 + 9.0f0 * band^2)
+        band = pair_count <= 1 ? 0f0 : Float32(i) / Float32(pair_count - 1)
+        k = 2f0 * Float32(π) / (1.2f0 + 9.0f0 * band^2)
         angle = base_angle + _std_normal!(rng) * 1.05f0 * (0.2f0 + 0.8f0 * band)
 
         for (dir, scale) in ((1f0, 1f0), (-1f0, 0.45f0))
-            kx  = dir * cos(angle) * k
-            ky  = dir * sin(angle) * k
+            kx = dir * cos(angle) * k
+            ky = dir * sin(angle) * k
             spec = phillips_spectrum(kx, ky, windx, windy)
-            AMP[idx]    = AMPLITUDE_SCALE * scale * sqrt(max(spec, 0f0)) * (0.35f0 + 0.65f0 * (1f0 - band))
+            AMP[idx] = AMPLITUDE_SCALE * scale * sqrt(max(spec, 0f0)) * (0.35f0 + 0.65f0 * (1f0 - band))
             PHASE0[idx] = _next_f32!(rng) * 2f0 * Float32(π)
-            OMEGA[idx]  = sqrt(GRAVITY * k)
-            KX[idx]     = kx
-            KY[idx]     = ky
+            OMEGA[idx] = sqrt(GRAVITY * k)
+            KX[idx] = kx
+            KY[idx] = ky
             idx += 1
         end
     end
@@ -178,16 +168,16 @@ Zero Julia allocation — operates entirely on raw pointers into pre-allocated b
     t::Float32, dest::Ptr{Float32}, cc::Int32,
 )::Cvoid
     """
-    let cc    = cc as usize;
-    let kx    = unsafe { std::slice::from_raw_parts(kx,    cc) };
-    let ky    = unsafe { std::slice::from_raw_parts(ky,    cc) };
-    let amp   = unsafe { std::slice::from_raw_parts(amp,   cc) };
-    let ph0   = unsafe { std::slice::from_raw_parts(phase0, cc) };
-    let omega = unsafe { std::slice::from_raw_parts(omega,  cc) };
-    let dest  = unsafe { std::slice::from_raw_parts_mut(dest, cc * 4) };
+    let cc = cc as usize;
+    let kx = unsafe { std::slice::from_raw_parts(kx, cc) };
+    let ky = unsafe { std::slice::from_raw_parts(ky, cc) };
+    let amp = unsafe { std::slice::from_raw_parts(amp, cc) };
+    let ph0 = unsafe { std::slice::from_raw_parts(phase0, cc) };
+    let omega = unsafe { std::slice::from_raw_parts(omega, cc) };
+    let dest = unsafe { std::slice::from_raw_parts_mut(dest, cc * 4) };
     for i in 0..cc {
         let b = i * 4;
-        dest[b]     = kx[i];
+        dest[b] = kx[i];
         dest[b + 1] = ky[i];
         dest[b + 2] = amp[i];
         dest[b + 3] = ph0[i] - omega[i] * t;
@@ -224,9 +214,9 @@ function init!()
     fc = RESOLUTION * RESOLUTION
     cc = COMPONENT_COUNT
 
-    AX.wgpu_create_buffer!(_BUF_FRAME,      fc * 4,      AX.BINDING_STORAGE_READ_WRITE)
-    AX.wgpu_create_buffer!(_BUF_COMPONENTS, cc * 4 * 4,  AX.BINDING_STORAGE_READ)
-    AX.wgpu_create_buffer!(_BUF_PARAMS,     16,           AX.BINDING_UNIFORM)
+    AX.wgpu_create_buffer!(_BUF_FRAME, fc * 4, AX.BINDING_STORAGE_READ_WRITE)
+    AX.wgpu_create_buffer!(_BUF_COMPONENTS, cc * 4 * 4, AX.BINDING_STORAGE_READ)
+    AX.wgpu_create_buffer!(_BUF_PARAMS, 16, AX.BINDING_UNIFORM)
 
     # Upload t=0 initial data
     @AX.call_rust_fn _pack_components!(
@@ -239,7 +229,7 @@ function init!()
         UInt32(RESOLUTION), UInt32(cc), 0f0, DOMAIN_SIZE,
     )
     AX.wgpu_write_buffer!(_BUF_COMPONENTS, _COMPONENTS_BUF)
-    AX.wgpu_write_buffer!(_BUF_PARAMS,     _PARAMS_BUF)
+    AX.wgpu_write_buffer!(_BUF_PARAMS, _PARAMS_BUF)
 
     binding_flags = UInt32[
         AX.BINDING_STORAGE_READ_WRITE,
@@ -277,7 +267,7 @@ function compute_wave!(data::Vector{Float32}, t::Float64)
     )
 
     AX.wgpu_write_buffer!(_BUF_COMPONENTS, _COMPONENTS_BUF)
-    AX.wgpu_write_buffer!(_BUF_PARAMS,     _PARAMS_BUF)
+    AX.wgpu_write_buffer!(_BUF_PARAMS, _PARAMS_BUF)
     AX.wgpu_dispatch!(_PIPELINE_ID; wg_x = cld(fc, _WORKGROUP_SIZE))
     AX.wgpu_read_buffer!(_BUF_FRAME, data)
 

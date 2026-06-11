@@ -89,7 +89,7 @@ fn rust_interpolate(ax: f32, ay: f32, az: f32, av: f32, bx: f32, by: f32, bz: f3
     """
     unsafe {
         let edge_dest = std::ptr::addr_of_mut!(EDGE_TABLE) as *mut i32;
-        let tri_dest  = std::ptr::addr_of_mut!(TRI_TABLE) as *mut i32;
+        let tri_dest = std::ptr::addr_of_mut!(TRI_TABLE) as *mut i32;
         
         std::ptr::copy_nonoverlapping(edge_ptr, edge_dest, 256);
         std::ptr::copy_nonoverlapping(tri_ptr, tri_dest, 4096);
@@ -146,7 +146,7 @@ end
     let dest = unsafe { std::slice::from_raw_parts_mut(dest, bc * 4) };
     for i in 0..bc {
         let b = i * 4;
-        dest[b]     = bx[i];
+        dest[b] = bx[i];
         dest[b + 1] = by[i];
         dest[b + 2] = bz[i];
         dest[b + 3] = bsize[i];
@@ -181,7 +181,7 @@ end
 
     unsafe {
         let edges = &*std::ptr::addr_of!(EDGE_TABLE);
-        let tris  = &*std::ptr::addr_of!(TRI_TABLE);
+        let tris = &*std::ptr::addr_of!(TRI_TABLE);
 
         for z in 0..(res - 1) {
             let z0 = axis[z]; let z1 = axis[z+1];
@@ -191,9 +191,9 @@ end
                     let x0 = axis[x]; let x1 = axis[x+1];
                     
                     let cv = [
-                        field[grid_index(x, y, z)],     field[grid_index(x+1, y, z)],
+                        field[grid_index(x, y, z)], field[grid_index(x+1, y, z)],
                         field[grid_index(x+1, y+1, z)], field[grid_index(x, y+1, z)],
-                        field[grid_index(x, y, z+1)],     field[grid_index(x+1, y, z+1)],
+                        field[grid_index(x, y, z+1)], field[grid_index(x+1, y, z+1)],
                         field[grid_index(x+1, y+1, z+1)], field[grid_index(x, y+1, z+1)],
                     ];
 
@@ -222,11 +222,11 @@ end
                         let e2 = tris[ti+1] as usize;
                         let e3 = tris[ti+2] as usize;
 
-                        v_out[o]   = ex[e1]*2.0 - 1.0; v_out[o+1] = ey[e1]*2.0 - 1.0; v_out[o+2] = ez[e1]*2.0 - 1.0;
+                        v_out[o] = ex[e1]*2.0 - 1.0; v_out[o+1] = ey[e1]*2.0 - 1.0; v_out[o+2] = ez[e1]*2.0 - 1.0;
                         v_out[o+3] = ex[e2]*2.0 - 1.0; v_out[o+4] = ey[e2]*2.0 - 1.0; v_out[o+5] = ez[e2]*2.0 - 1.0;
                         v_out[o+6] = ex[e3]*2.0 - 1.0; v_out[o+7] = ey[e3]*2.0 - 1.0; v_out[o+8] = ez[e3]*2.0 - 1.0;
 
-                        n_out[o]   = enx[e1]; n_out[o+1] = eny[e1]; n_out[o+2] = enz[e1];
+                        n_out[o] = enx[e1]; n_out[o+1] = eny[e1]; n_out[o+2] = enz[e1];
                         n_out[o+3] = enx[e2]; n_out[o+4] = eny[e2]; n_out[o+5] = enz[e2];
                         n_out[o+6] = enx[e3]; n_out[o+7] = eny[e3]; n_out[o+8] = enz[e3];
 

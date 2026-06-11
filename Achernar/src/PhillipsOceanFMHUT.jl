@@ -19,7 +19,7 @@ function start_server()
 
     try
         start_time = time()
-        interval   = 1.0 / 60.0
+        interval = 1.0 / 60.0
 
         while FMHUT._server_running[]
             frame_start = time()
@@ -29,7 +29,7 @@ function start_server()
             payload = vec(reinterpret(UInt8, PhillipsOceanAX.FRAME_BUFFER))
             FMHUT.broadcast_frame!(_WS_PATH, payload)
 
-            elapsed      = time() - frame_start
+            elapsed = time() - frame_start
             target_sleep = interval - elapsed
 
             if target_sleep > 0.002
