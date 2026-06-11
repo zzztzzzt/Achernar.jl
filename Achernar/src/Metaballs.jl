@@ -4,28 +4,24 @@ using Base.Threads
 using CUDA
 using StaticArrays
 
-#=
-Public API
-=#
+# Public API
 export FRAME_INTERVAL, ENABLE_THREADED_FIELD
 export FIELD_BUFFER, VERTEX_BUFFER, NORMAL_BUFFER, PAYLOAD_BUFFER
 export init_buffers!
 export update_physics!, compute_field!, build_mesh!, build_payload!
 
-#=
-Constants
-=#
-const BALL_COUNT        = 12
-const FRAME_INTERVAL    = 1 / 30
-const SPEED_LIMIT       = 0.008f0
+# Constants
+const BALL_COUNT = 12
+const FRAME_INTERVAL = 1 / 30
+const SPEED_LIMIT = 0.008f0
 
-const GRID_RESOLUTION   = 108
-const GRID_SIZE         = GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION
-const CUBE_COUNT        = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1)
-const MAX_TRIANGLES     = CUBE_COUNT * 5
-const ISOLEVEL          = 80.0f0
-const SUBTRACT          = 8.0f0
-const FIELD_EPSILON     = 1.0f-6
+const GRID_RESOLUTION = 108
+const GRID_SIZE = GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION
+const CUBE_COUNT = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1)
+const MAX_TRIANGLES = CUBE_COUNT * 5
+const ISOLEVEL = 80.0f0
+const SUBTRACT = 8.0f0
+const FIELD_EPSILON = 1.0f-6
 const THREAD_SLOT_COUNT = max(1, Threads.maxthreadid())
 
 const ENABLE_THREADED_FIELD = nthreads() > 1
@@ -47,12 +43,12 @@ GPU buffers — Ref{Any}(nothing) avoids allocating GPU memory during precompila
 Populated by init_gpu_buffers!() at runtime.
 =#
 const _CUDA_ENABLED  = Ref(false)
-const d_GRID_AXIS    = Ref{Any}(nothing)
+const d_GRID_AXIS = Ref{Any}(nothing)
 const d_FIELD_BUFFER = Ref{Any}(nothing)
-const d_BLOB_X       = Ref{Any}(nothing)
-const d_BLOB_Y       = Ref{Any}(nothing)
-const d_BLOB_Z       = Ref{Any}(nothing)
-const d_BLOB_SIZE    = Ref{Any}(nothing)
+const d_BLOB_X = Ref{Any}(nothing)
+const d_BLOB_Y = Ref{Any}(nothing)
+const d_BLOB_Z = Ref{Any}(nothing)
+const d_BLOB_SIZE = Ref{Any}(nothing)
 
 include("utils/MarchingCubesTables.jl")
 
@@ -87,45 +83,45 @@ const BLOBS = init_blobs()
 # These CPU-side SoA buffers are reused every frame.
 # We use Ref{Any}(nothing) to prevent 900MB of uninitialized memory 
 # from being serialized into the precompiled .dll.
-const BLOB_X_BUFFER    = Ref{Vector{Float32}}(Float32[])
-const BLOB_Y_BUFFER    = Ref{Vector{Float32}}(Float32[])
-const BLOB_Z_BUFFER    = Ref{Vector{Float32}}(Float32[])
+const BLOB_X_BUFFER = Ref{Vector{Float32}}(Float32[])
+const BLOB_Y_BUFFER = Ref{Vector{Float32}}(Float32[])
+const BLOB_Z_BUFFER = Ref{Vector{Float32}}(Float32[])
 const BLOB_SIZE_BUFFER = Ref{Vector{Float32}}(Float32[])
-const FIELD_BUFFER     = Ref{Vector{Float32}}(Float32[])
-const VERTEX_BUFFER    = Ref{Vector{Float32}}(Float32[])
-const NORMAL_BUFFER    = Ref{Vector{Float32}}(Float32[])
-const PAYLOAD_BUFFER   = Ref{Vector{Float32}}(Float32[])
+const FIELD_BUFFER = Ref{Vector{Float32}}(Float32[])
+const VERTEX_BUFFER = Ref{Vector{Float32}}(Float32[])
+const NORMAL_BUFFER = Ref{Vector{Float32}}(Float32[])
+const PAYLOAD_BUFFER = Ref{Vector{Float32}}(Float32[])
 
 const THREAD_VERTEX_BUFFERS = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
 const THREAD_NORMAL_BUFFERS = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
-const THREAD_MESH_COUNTS    = Ref{Vector{Int}}(Int[])
-const THREAD_EDGE_X         = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
-const THREAD_EDGE_Y         = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
-const THREAD_EDGE_Z         = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
-const THREAD_EDGE_NX        = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
-const THREAD_EDGE_NY        = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
-const THREAD_EDGE_NZ        = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_MESH_COUNTS = Ref{Vector{Int}}(Int[])
+const THREAD_EDGE_X = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_Y = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_Z = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_NX = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_NY = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
+const THREAD_EDGE_NZ = Ref{Vector{Vector{Float32}}}(Vector{Float32}[])
 
 function init_buffers!()
     # Initialize CPU Buffers
-    BLOB_X_BUFFER[]    = zeros(Float32, BALL_COUNT)
-    BLOB_Y_BUFFER[]    = zeros(Float32, BALL_COUNT)
-    BLOB_Z_BUFFER[]    = zeros(Float32, BALL_COUNT)
+    BLOB_X_BUFFER[] = zeros(Float32, BALL_COUNT)
+    BLOB_Y_BUFFER[] = zeros(Float32, BALL_COUNT)
+    BLOB_Z_BUFFER[] = zeros(Float32, BALL_COUNT)
     BLOB_SIZE_BUFFER[] = zeros(Float32, BALL_COUNT)
-    FIELD_BUFFER[]     = Vector{Float32}(undef, GRID_SIZE)
-    VERTEX_BUFFER[]    = Vector{Float32}(undef, MAX_TRIANGLES * 9)
-    NORMAL_BUFFER[]    = Vector{Float32}(undef, MAX_TRIANGLES * 9)
-    PAYLOAD_BUFFER[]   = Vector{Float32}(undef, 1 + MAX_TRIANGLES * 18)
+    FIELD_BUFFER[] = Vector{Float32}(undef, GRID_SIZE)
+    VERTEX_BUFFER[]  = Vector{Float32}(undef, MAX_TRIANGLES * 9)
+    NORMAL_BUFFER[] = Vector{Float32}(undef, MAX_TRIANGLES * 9)
+    PAYLOAD_BUFFER[] = Vector{Float32}(undef, 1 + MAX_TRIANGLES * 18)
 
     thread_slot_count = max(1, Threads.maxthreadid())
     thread_mesh_capacity = max(9, cld(MAX_TRIANGLES * 9, thread_slot_count) * 2)
 
     THREAD_VERTEX_BUFFERS[] = [Vector{Float32}(undef, thread_mesh_capacity) for _ in 1:thread_slot_count]
     THREAD_NORMAL_BUFFERS[] = [Vector{Float32}(undef, thread_mesh_capacity) for _ in 1:thread_slot_count]
-    THREAD_MESH_COUNTS[]    = zeros(Int, thread_slot_count)
-    THREAD_EDGE_X[]  = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
-    THREAD_EDGE_Y[]  = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
-    THREAD_EDGE_Z[]  = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_MESH_COUNTS[] = zeros(Int, thread_slot_count)
+    THREAD_EDGE_X[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_Y[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
+    THREAD_EDGE_Z[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
     THREAD_EDGE_NX[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
     THREAD_EDGE_NY[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
     THREAD_EDGE_NZ[] = [Vector{Float32}(undef, 12) for _ in 1:thread_slot_count]
@@ -138,12 +134,12 @@ function init_buffers!()
     end
 
     if _CUDA_ENABLED[]
-        d_GRID_AXIS[]    = CuArray(GRID_AXIS)
+        d_GRID_AXIS[] = CuArray(GRID_AXIS)
         d_FIELD_BUFFER[] = CUDA.zeros(Float32, GRID_SIZE)
-        d_BLOB_X[]       = CUDA.zeros(Float32, BALL_COUNT)
-        d_BLOB_Y[]       = CUDA.zeros(Float32, BALL_COUNT)
-        d_BLOB_Z[]       = CUDA.zeros(Float32, BALL_COUNT)
-        d_BLOB_SIZE[]    = CUDA.zeros(Float32, BALL_COUNT)
+        d_BLOB_X[] = CUDA.zeros(Float32, BALL_COUNT)
+        d_BLOB_Y[] = CUDA.zeros(Float32, BALL_COUNT)
+        d_BLOB_Z[] = CUDA.zeros(Float32, BALL_COUNT)
+        d_BLOB_SIZE[] = CUDA.zeros(Float32, BALL_COUNT)
     end
 end
 
@@ -237,9 +233,9 @@ function update_blob_buffers!()
     # Copy the mutable blob structs into flat arrays before the GPU upload
     @inbounds for i in 1:BALL_COUNT
         blob = BLOBS[i]
-        BLOB_X_BUFFER[][i]    = blob.x
-        BLOB_Y_BUFFER[][i]    = blob.y
-        BLOB_Z_BUFFER[][i]    = blob.z
+        BLOB_X_BUFFER[][i] = blob.x
+        BLOB_Y_BUFFER[][i] = blob.y
+        BLOB_Z_BUFFER[][i] = blob.z
         BLOB_SIZE_BUFFER[][i] = blob.size
     end
 end
@@ -376,7 +372,7 @@ end
     bnx::Float32, bny::Float32, bnz::Float32,
     cnx::Float32, cny::Float32, cnz::Float32,
 ) 
-    vertices[offset]     = ax * 2.0f0 - 1.0f0
+    vertices[offset] = ax * 2.0f0 - 1.0f0
     vertices[offset + 1] = ay * 2.0f0 - 1.0f0
     vertices[offset + 2] = az * 2.0f0 - 1.0f0
     vertices[offset + 3] = bx * 2.0f0 - 1.0f0
@@ -386,7 +382,7 @@ end
     vertices[offset + 7] = cy * 2.0f0 - 1.0f0
     vertices[offset + 8] = cz * 2.0f0 - 1.0f0
 
-    normals[offset]     = anx
+    normals[offset] = anx
     normals[offset + 1] = any
     normals[offset + 2] = anz
     normals[offset + 3] = bnx
@@ -427,13 +423,13 @@ function build_mesh_serial!(vertices::Vector{Float32}, normals::Vector{Float32},
                 x0 = GRID_AXIS[x]
                 x1 = GRID_AXIS[x + 1]
 
-                q    = grid_index(x,     y,     z)
-                q1   = grid_index(x + 1, y,     z)
-                qy   = grid_index(x,     y + 1, z)
-                q1y  = grid_index(x + 1, y + 1, z)
-                qz   = grid_index(x,     y,     z + 1)
-                q1z  = grid_index(x + 1, y,     z + 1)
-                qyz  = grid_index(x,     y + 1, z + 1)
+                q = grid_index(x, y, z)
+                q1 = grid_index(x + 1, y, z)
+                qy = grid_index(x, y + 1, z)
+                q1y = grid_index(x + 1, y + 1, z)
+                qz = grid_index(x, y, z + 1)
+                q1z = grid_index(x + 1, y, z + 1)
+                qyz = grid_index(x, y + 1, z + 1)
                 q1yz = grid_index(x + 1, y + 1, z + 1)
 
                 cube_values = SVector{8, Float32}(
@@ -528,13 +524,13 @@ function build_mesh_threaded!(vertices::Vector{Float32}, normals::Vector{Float32
                     x0 = GRID_AXIS[x]
                     x1 = GRID_AXIS[x + 1]
 
-                    q    = grid_index(x,     y,     z)
-                    q1   = grid_index(x + 1, y,     z)
-                    qy   = grid_index(x,     y + 1, z)
-                    q1y  = grid_index(x + 1, y + 1, z)
-                    qz   = grid_index(x,     y,     z + 1)
-                    q1z  = grid_index(x + 1, y,     z + 1)
-                    qyz  = grid_index(x,     y + 1, z + 1)
+                    q = grid_index(x, y, z)
+                    q1 = grid_index(x + 1, y, z)
+                    qy = grid_index(x, y + 1, z)
+                    q1y = grid_index(x + 1, y + 1, z)
+                    qz = grid_index(x, y, z + 1)
+                    q1z = grid_index(x + 1, y, z + 1)
+                    qyz = grid_index(x, y + 1, z + 1)
                     q1yz = grid_index(x + 1, y + 1, z + 1)
 
                     # Use SVector ( this is 100% configured on the register, zero heap allocation )
