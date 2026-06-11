@@ -3,59 +3,51 @@ module MetaballsAX
 import Axis as AX
 using StaticArrays
 
-#=
-Public API
-=#
+# Public API
 export FRAME_INTERVAL
 export FIELD_BUFFER, VERTEX_BUFFER, NORMAL_BUFFER, PAYLOAD_BUFFER
 export update_physics!, compute_field!, build_mesh!, build_payload!
 export init!
 
-#=
-Constants
-=#
-const BALL_COUNT      = 12
-const FRAME_INTERVAL  = 1 / 30
-const SPEED_LIMIT     = 0.008f0
+# Constants
+const BALL_COUNT = 12
+const FRAME_INTERVAL = 1 / 30
+const SPEED_LIMIT = 0.008f0
 
 const GRID_RESOLUTION = 108
-const GRID_SIZE       = GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION
-const CUBE_COUNT      = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1)
-const MAX_TRIANGLES   = CUBE_COUNT * 5
-const ISOLEVEL        = 80.0f0
-const SUBTRACT        = 8.0f0
-const FIELD_EPSILON   = 1.0f-6
+const GRID_SIZE = GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION
+const CUBE_COUNT = (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1) * (GRID_RESOLUTION - 1)
+const MAX_TRIANGLES = CUBE_COUNT * 5
+const ISOLEVEL = 80.0f0
+const SUBTRACT = 8.0f0
+const FIELD_EPSILON = 1.0f-6
 
-#=
-GPU Resource IDs
-=#
-const _BUF_FIELD      = 10
-const _BUF_GRID_AXIS  = 11
-const _BUF_BLOB_DATA  = 12
-const _BUF_PARAMS     = 13
-const _PIPELINE_ID    = 10
+# GPU Resource IDs
+const _BUF_FIELD = 10
+const _BUF_GRID_AXIS = 11
+const _BUF_BLOB_DATA = 12
+const _BUF_PARAMS = 13
+const _PIPELINE_ID = 10
 const _WORKGROUP_SIZE = (8, 8, 4)
 
-#=
-SoA Pre-allocated Storage
-=#
-const BLOB_X    = Vector{Float32}(undef, BALL_COUNT)
-const BLOB_Y    = Vector{Float32}(undef, BALL_COUNT)
-const BLOB_Z    = Vector{Float32}(undef, BALL_COUNT)
-const BLOB_VX   = Vector{Float32}(undef, BALL_COUNT)
-const BLOB_VY   = Vector{Float32}(undef, BALL_COUNT)
-const BLOB_VZ   = Vector{Float32}(undef, BALL_COUNT)
+# SoA Pre-allocated Storage
+const BLOB_X = Vector{Float32}(undef, BALL_COUNT)
+const BLOB_Y = Vector{Float32}(undef, BALL_COUNT)
+const BLOB_Z = Vector{Float32}(undef, BALL_COUNT)
+const BLOB_VX = Vector{Float32}(undef, BALL_COUNT)
+const BLOB_VY = Vector{Float32}(undef, BALL_COUNT)
+const BLOB_VZ = Vector{Float32}(undef, BALL_COUNT)
 const BLOB_SIZE = Vector{Float32}(undef, BALL_COUNT)
 
 const GRID_AXIS = Float32[(i - 1) / Float32(GRID_RESOLUTION - 1) for i in 1:GRID_RESOLUTION]
 
 # Reusable Buffers
-const FIELD_BUFFER   = Vector{Float32}(undef, GRID_SIZE)
-const VERTEX_BUFFER  = Vector{Float32}(undef, MAX_TRIANGLES * 9)
-const NORMAL_BUFFER  = Vector{Float32}(undef, MAX_TRIANGLES * 9)
+const FIELD_BUFFER = Vector{Float32}(undef, GRID_SIZE)
+const VERTEX_BUFFER = Vector{Float32}(undef, MAX_TRIANGLES * 9)
+const NORMAL_BUFFER = Vector{Float32}(undef, MAX_TRIANGLES * 9)
 const PAYLOAD_BUFFER = Vector{Float32}(undef, 1 + MAX_TRIANGLES * 18)
 const _BLOB_DATA_BUF = Vector{Float32}(undef, BALL_COUNT * 4)
-const _PARAMS_BUF    = Vector{UInt8}(undef, 16)
+const _PARAMS_BUF = Vector{UInt8}(undef, 16)
 
 include("utils/MarchingCubesTables.jl")
 
@@ -345,10 +337,10 @@ function init!()
     tri_i32  = Int32.(TRI_TABLE)
     @AX.call_rust_fn _rust_init_tables!(pointer(edge_i32), pointer(tri_i32))
 
-    AX.wgpu_create_buffer!(_BUF_FIELD,     GRID_SIZE * 4,       AX.BINDING_STORAGE_READ_WRITE)
+    AX.wgpu_create_buffer!(_BUF_FIELD, GRID_SIZE * 4, AX.BINDING_STORAGE_READ_WRITE)
     AX.wgpu_create_buffer!(_BUF_GRID_AXIS, GRID_RESOLUTION * 4, AX.BINDING_STORAGE_READ)
-    AX.wgpu_create_buffer!(_BUF_BLOB_DATA, BALL_COUNT * 16,     AX.BINDING_STORAGE_READ)
-    AX.wgpu_create_buffer!(_BUF_PARAMS,    16,                  AX.BINDING_UNIFORM)
+    AX.wgpu_create_buffer!(_BUF_BLOB_DATA, BALL_COUNT * 16, AX.BINDING_STORAGE_READ)
+    AX.wgpu_create_buffer!(_BUF_PARAMS, 16, AX.BINDING_UNIFORM)
     
     AX.wgpu_write_buffer!(_BUF_GRID_AXIS, GRID_AXIS)
     

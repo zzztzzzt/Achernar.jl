@@ -7,15 +7,15 @@ include("PhillipsOceanOxygen.jl")
 include("PhillipsOceanAX.jl")
 include("PhillipsOceanFMHUT.jl")
 
-include("Metaballs.jl")
-include("MetaballsOxygen.jl")
-include("MetaballsAX.jl")
-include("MetaballsFMHUT.jl")
-
 using .PhillipsOcean
 using .PhillipsOceanOxygen
 using .PhillipsOceanAX
 using .PhillipsOceanFMHUT
+
+include("Metaballs.jl")
+include("MetaballsOxygen.jl")
+include("MetaballsAX.jl")
+include("MetaballsFMHUT.jl")
 
 using .Metaballs
 using .MetaballsOxygen

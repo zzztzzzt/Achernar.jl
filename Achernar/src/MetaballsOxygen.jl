@@ -16,7 +16,7 @@ function metaballs_stream_handler(ws::HTTP.WebSocket)
 
     try
         while true
-            frame_start   = time()
+            frame_start = time()
             elapsed_total = frame_start - start_time
 
             update_physics!(elapsed_total)
