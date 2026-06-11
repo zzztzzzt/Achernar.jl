@@ -13,15 +13,16 @@ import {
   float,
   mix,
 } from "three/tsl";
+import {
+  CONTENT_TYPE_FLOAT32_TENSOR,
+  normalizeSocketPayload,
+  parseEnvelopeOrLegacyFloat32,
+} from "./frame-parser.js";
 
 const GRID_RESOLUTION = 512;
 const PLANE_SIZE = 20;
 const HEIGHT_SCALE = 1.35;
 const APP = document.querySelector("#app");
-
-const ENVELOPE_HEADER_LEN = 17;
-const ENVELOPE_VERSION_V1 = 1;
-const CONTENT_TYPE_FLOAT32_TENSOR = 1;
 
 if (!APP) throw new Error("Missing #app mount element.");
 if (!navigator.gpu) throw new Error("WebGPU is required for the Phillips ocean viewer.");
@@ -147,35 +148,6 @@ function applyHeights(heights) {
   heightTexture.needsUpdate = true;
 }
 
-function parseEnvelopeV1(arrayBuffer) {
-  if (arrayBuffer.byteLength < ENVELOPE_HEADER_LEN) {
-    throw new Error("Frame too small for envelope v1.");
-  }
-
-  const view = new DataView(arrayBuffer);
-  const version = view.getUint8(0);
-  const contentType = view.getUint16(1, true);
-  const flags = view.getUint16(3, true);
-  const timestampNs = view.getBigUint64(5, true);
-  const payloadLen = view.getUint32(13, true);
-
-  if (version !== ENVELOPE_VERSION_V1) {
-    throw new Error(`Unsupported envelope version: ${version}`);
-  }
-
-  const payloadOffset = ENVELOPE_HEADER_LEN;
-  const payloadEnd = payloadOffset + payloadLen;
-
-  if (arrayBuffer.byteLength !== payloadEnd) {
-    throw new Error("Envelope payload length mismatch.");
-  }
-
-  // IMPORTANT : header is 17 bytes ( not 4-byte aligned ), so we copy payload
-  const payloadBuffer = arrayBuffer.slice(payloadOffset, payloadEnd);
-
-  return { contentType, flags, timestampNs, payloadBuffer };
-}
-
 // WIP : ws needs to be replaaced by wss in the future
 const socket = new WebSocket("ws://localhost:8080/phillips-ocean");
 socket.binaryType = "arraybuffer";
@@ -185,11 +157,12 @@ socket.addEventListener("open", () => {
 });
 
 socket.addEventListener("message", (event) => {
-  if (!(event.data instanceof ArrayBuffer)) {
-    throw new Error("Wave socket payload must be an ArrayBuffer.");
-  }
-
-  const frame = parseEnvelopeV1(event.data);
+  const arrayBuffer = normalizeSocketPayload(event.data, "Wave socket");
+  const frame = parseEnvelopeOrLegacyFloat32(arrayBuffer, (data) => {
+    if (data.length === 0) {
+      throw new Error("Legacy wave payload is empty.");
+    }
+  }, "Legacy wave");
 
   if (frame.contentType !== CONTENT_TYPE_FLOAT32_TENSOR) {
     // Ignore unsupported payload type for this viewer
